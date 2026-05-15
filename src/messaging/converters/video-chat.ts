@@ -13,18 +13,24 @@ export const convertVideoChat: ContentConverterFn = (raw) => {
     | {
         topic?: string;
         start_time?: string;
+        meet_number?: string;
       }
     | undefined;
 
   const topic = parsed?.topic ?? '';
+  const meetingNo = parsed?.meet_number?.trim() ?? '';
   const parts: string[] = [];
 
   if (topic) {
-    parts.push(`📹 ${topic}`);
+    parts.push(`Topic: ${topic}`);
   }
 
   if (parsed?.start_time) {
-    parts.push(`🕙 ${millisToDatetime(parsed.start_time)}`);
+    parts.push(`Start time: ${millisToDatetime(parsed.start_time)}`);
+  }
+
+  if (meetingNo) {
+    parts.push(`Meeting number: ${meetingNo}`);
   }
 
   const inner = parts.join('\n') || '[video chat]';
