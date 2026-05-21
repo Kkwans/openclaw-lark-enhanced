@@ -939,7 +939,10 @@ export class StreamingCardController {
             this.cardKit.cardMessageId = result.messageId;
             this.flush.setCardMessageReady(true);
             // Register for pause button callback
-            registerPauseTarget(result.messageId, () => this.abortCard());
+            registerPauseTarget(result.messageId, {
+              abortCard: () => this.abortCard(),
+              abortController: this.deps.abortController,
+            });
             if (!this.transition('streaming', 'ensureCardCreated.cardkit')) {
               this.disposeShutdownHook?.();
               this.disposeShutdownHook = null;
@@ -983,7 +986,10 @@ export class StreamingCardController {
           this.cardKit.cardMessageId = result.messageId;
           this.flush.setCardMessageReady(true);
           // Register for pause button callback
-          registerPauseTarget(result.messageId, () => this.abortCard());
+          registerPauseTarget(result.messageId, {
+            abortCard: () => this.abortCard(),
+            abortController: this.deps.abortController,
+          });
           if (!this.transition('streaming', 'ensureCardCreated.imFallback')) {
             return;
           }

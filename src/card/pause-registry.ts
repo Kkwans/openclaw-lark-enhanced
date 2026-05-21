@@ -17,43 +17,54 @@ const log = larkLogger('card/pause-registry');
 // Registry
 // ---------------------------------------------------------------------------
 
-type AbortFunction = () => Promise<void>;
+export interface PauseTarget {
+  /** Abort the card UI (update card to show stopped state). */
+  abortCard: () => Promise<void>;
+  /** Abort the underlying LLM generation via AbortSignal. */
+  abortController?: AbortController;
+}
 
-const activeControllers = new Map<string, AbortFunction>();
+const activeTargets = new Map<string, PauseTarget>();
 
 /**
- * Register a streaming controller's abort function for a given message ID.
+ * Register a streaming controller's abort functions for a given message ID.
  */
-export function registerPauseTarget(messageId: string, abortFn: AbortFunction): void {
-  activeControllers.set(messageId, abortFn);
-  log.debug('pause target registered', { messageId, registrySize: activeControllers.size });
+export function registerPauseTarget(messageId: string, target: PauseTarget): void {
+  activeTargets.set(messageId, target);
+  log.debug('pause target registered', { messageId, registrySize: activeTargets.size });
 }
 
 /**
  * Unregister a streaming controller when it reaches a terminal phase.
  */
 export function unregisterPauseTarget(messageId: string): void {
-  const deleted = activeControllers.delete(messageId);
+  const deleted = activeTargets.delete(messageId);
   if (deleted) {
-    log.debug('pause target unregistered', { messageId, registrySize: activeControllers.size });
+    log.debug('pause target unregistered', { messageId, registrySize: activeTargets.size });
   }
 }
 
 /**
  * Trigger abort for a streaming card identified by its message ID.
  *
+ * Aborts both the LLM generation (via AbortController) and the card UI.
  * Returns true if a matching controller was found and abort was triggered.
  */
 export async function triggerPauseByMessageId(messageId: string): Promise<boolean> {
-  const abortFn = activeControllers.get(messageId);
-  if (!abortFn) {
+  const target = activeTargets.get(messageId);
+  if (!target) {
     log.debug('pause target not found', { messageId });
     return false;
   }
   try {
     log.info('triggering pause/abort', { messageId });
-    await abortFn();
-    // Abort itself will unregister via onEnterTerminalPhase
+    // Abort the LLM generation first (stops token streaming)
+    if (target.abortController) {
+      target.abortController.abort();
+    }
+    // Then abort the card UI (update card to show stopped state)
+    await target.abortCard();
+    // Target itself will unregister via onEnterTerminalPhase
     return true;
   } catch (err) {
     log.warn('pause trigger failed', { messageId, error: String(err) });
@@ -65,5 +76,5 @@ export async function triggerPauseByMessageId(messageId: string): Promise<boolea
  * Check if a message has an active streaming controller.
  */
 export function hasActiveStreaming(messageId: string): boolean {
-  return activeControllers.has(messageId);
+  return activeTargets.has(messageId);
 }

@@ -135,6 +135,8 @@ export interface CreateFeishuReplyDispatcherParams {
   /** Thread root id when the reply lives inside a thread; used for sentinel keying. */
   threadId?: string;
   toolUseDisplay: ToolUseDisplayConfig;
+  /** AbortController for the underlying LLM generation. Used by pause button. */
+  abortController?: AbortController;
 }
 
 /**
@@ -178,4 +180,6 @@ export interface StreamingCardDeps {
   replyInThread: boolean | undefined;
   toolUseDisplay: ToolUseDisplayConfig;
   resolvedFooter: Required<FeishuFooterConfig>;
+  /** AbortController for the underlying LLM generation. Used by pause button. */
+  abortController?: AbortController;
 }
