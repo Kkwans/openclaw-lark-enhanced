@@ -58,6 +58,10 @@ export interface StreamingFooterConfig {
   model?: boolean;
   /** Show session cumulative stats. */
   sessionStats?: boolean;
+  /** Show daily aggregated stats. */
+  dailyStats?: boolean;
+  /** Show monthly aggregated stats. */
+  monthlyStats?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -78,6 +82,8 @@ export class StreamingFooterManager {
       context: config?.context ?? false,
       model: config?.model ?? false,
       sessionStats: config?.sessionStats ?? false,
+      dailyStats: config?.dailyStats ?? false,
+      monthlyStats: config?.monthlyStats ?? false,
     };
     this.sessionKey = sessionKey;
     this.state = {
@@ -239,7 +245,27 @@ export class StreamingFooterManager {
       }
     }
 
+    // Line 4: daily + monthly stats
+    const periodParts: string[] = [];
+    if (this.config.dailyStats) {
+      const dailySummary = sessionStatsStore.getDailySummary();
+      if (dailySummary) {
+        periodParts.push(dailySummary.formatted);
+      }
+    }
+    if (this.config.monthlyStats) {
+      const monthlySummary = sessionStatsStore.getMonthlySummary();
+      if (monthlySummary) {
+        periodParts.push(monthlySummary.formatted);
+      }
+    }
+    if (periodParts.length > 0) {
+      lines.push(periodParts.join(' | '));
+    }
+
     if (lines.length === 0) return '';
+    // Wrap in notation-sized markdown for footer style
+    return lines.join('\n');
 
     // Wrap in notation-sized markdown for footer style
     return lines.join('\n');

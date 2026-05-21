@@ -77,6 +77,8 @@ export interface FeishuFooterConfig {
   context?: boolean;
   model?: boolean;
   sessionStats?: boolean;
+  dailyStats?: boolean;
+  monthlyStats?: boolean;
 }
 
 // ---------------------------------------------------------------------------

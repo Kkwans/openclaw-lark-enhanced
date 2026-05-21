@@ -12,6 +12,7 @@ import { optimizeMarkdownStyle } from './markdown-style';
 import type { FooterSessionMetrics } from './reply-dispatcher-types';
 import { EMPTY_TOOL_USE_PLACEHOLDER, type ToolUseDisplayStep } from './tool-use-display';
 import { FOOTER_ELEMENT_ID } from './streaming-footer';
+import { sessionStatsStore } from './session-stats';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -221,6 +222,8 @@ export function formatFooterRuntimeSegments(params: {
     cache?: boolean;
     context?: boolean;
     model?: boolean;
+    dailyStats?: boolean;
+    monthlyStats?: boolean;
   };
   metrics?: FooterSessionMetrics;
   elapsedMs?: number;
@@ -332,6 +335,8 @@ export function buildCardContent(
       cache?: boolean;
       context?: boolean;
       model?: boolean;
+      dailyStats?: boolean;
+      monthlyStats?: boolean;
     };
     footerMetrics?: FooterSessionMetrics;
   } = {},
@@ -452,6 +457,8 @@ function buildCompleteCard(params: {
     cache?: boolean;
     context?: boolean;
     model?: boolean;
+    dailyStats?: boolean;
+    monthlyStats?: boolean;
   };
   footerMetrics?: FooterSessionMetrics;
 }): FeishuCard {
@@ -547,6 +554,28 @@ function buildCompleteCard(params: {
     footerZhLines.push(fp.detailZh.join(' · '));
     footerEnLines.push(fp.detailEn.join(' · '));
   }
+  // Line 3: session cumulative stats
+  if (footer?.sessionStats) {
+    // Note: sessionKey not available here; stats are rendered by StreamingFooterManager
+    // during streaming. For the terminal card, we skip session stats in builder.ts
+    // to avoid coupling with session state. The streaming footer handles this.
+  }
+
+  // Line 4: daily + monthly stats
+  const periodParts: string[] = [];
+  if (footer?.dailyStats) {
+    const dailySummary = sessionStatsStore.getDailySummary();
+    if (dailySummary) periodParts.push(dailySummary.formatted);
+  }
+  if (footer?.monthlyStats) {
+    const monthlySummary = sessionStatsStore.getMonthlySummary();
+    if (monthlySummary) periodParts.push(monthlySummary.formatted);
+  }
+  if (periodParts.length > 0) {
+    footerZhLines.push(periodParts.join(' | '));
+    footerEnLines.push(periodParts.join(' | '));
+  }
+
   if (footerZhLines.length > 0) {
     elements.push(...buildFooter(footerZhLines.join('\n'), footerEnLines.join('\n'), isError));
   }
