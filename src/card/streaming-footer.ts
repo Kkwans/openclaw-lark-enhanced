@@ -274,10 +274,6 @@ export class StreamingFooterManager {
     }
 
     if (lines.length === 0) return '';
-    // Wrap in notation-sized markdown for footer style
-    return lines.join('\n');
-
-    // Wrap in notation-sized markdown for footer style
     return lines.join('\n');
   }
 }
