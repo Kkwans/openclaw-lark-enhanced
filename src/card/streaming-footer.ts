@@ -28,6 +28,15 @@ export const FOOTER_ELEMENT_ID = 'streaming_footer';
 /** Maximum footer update frequency (ms between updates). */
 const FOOTER_THROTTLE_MS = 500; // 2x/sec
 
+/** Animation frames for streaming status (spinning dot). */
+const SPIN_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+/** Get the current animation frame based on elapsed time. */
+function getSpinFrame(elapsedMs: number): string {
+  const index = Math.floor(elapsedMs / 300) % SPIN_FRAMES.length;
+  return SPIN_FRAMES[index];
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -171,7 +180,8 @@ export class StreamingFooterManager {
 
     if (this.config.status) {
       if (state === 'streaming') {
-        primary.push('⚡ 生成中');
+        const spin = getSpinFrame(elapsedMs);
+        primary.push(`${spin} 生成中`);
       } else if (state === 'error') {
         primary.push('❌ 出错');
       } else if (state === 'abort') {
