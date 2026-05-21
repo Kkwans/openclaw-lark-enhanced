@@ -661,6 +661,13 @@ export function buildStreamingThinkingCard(showToolUse = true): Record<string, u
  * Build a CardKit 2.0 card for the pre-answer streaming phase.
  * Used both for the initial card and for live updates during tool calls.
  */
+export const PAUSE_ACTION_ID = 'streaming_pause';
+
+/**
+ * Build a CardKit 2.0 card for the pre-answer streaming phase.
+ * Used both for the initial card and for live updates during tool calls.
+ * Includes a pause button so users can abort the streaming output.
+ */
 export function buildStreamingPreAnswerCard(params: {
   steps?: ToolUseDisplayStep[];
   elapsedMs?: number;
@@ -683,6 +690,28 @@ export function buildStreamingPreAnswerCard(params: {
     text_size: 'normal_v2',
     margin: '0px 0px 0px 0px',
     element_id: STREAMING_ELEMENT_ID,
+  });
+
+  // Pause button — visible during streaming, hidden after completion
+  elements.push({
+    tag: 'action',
+    actions: [
+      {
+        tag: 'button',
+        text: {
+          tag: 'plain_text',
+          content: '⏸️ Stop',
+          i18n_content: {
+            zh_cn: '⏸️ 暂停',
+            en_us: '⏸️ Stop',
+          },
+        },
+        type: 'default',
+        value: {
+          action: PAUSE_ACTION_ID,
+        },
+      },
+    ],
   });
 
   elements.push({

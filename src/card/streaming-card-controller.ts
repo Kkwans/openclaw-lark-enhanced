@@ -66,6 +66,7 @@ import {
 import { UnavailableGuard } from './unavailable-guard';
 import { StreamingFooterManager, FOOTER_ELEMENT_ID, buildFooterElement, buildDividerElement } from './streaming-footer';
 import { sessionStatsStore } from './session-stats';
+import { registerPauseTarget, unregisterPauseTarget } from './pause-registry';
 
 const log = larkLogger('card/streaming');
 
@@ -423,6 +424,10 @@ export class StreamingCardController {
     this.flush.complete();
     this.disposeShutdownHook?.();
     this.disposeShutdownHook = null;
+    // Unregister pause button target
+    if (this.cardKit.cardMessageId) {
+      unregisterPauseTarget(this.cardKit.cardMessageId);
+    }
     if (this.phase === 'terminated' || this.phase === 'creation_failed') {
       clearToolUseTraceRun(this.deps.sessionKey);
     }
@@ -933,6 +938,8 @@ export class StreamingCardController {
 
             this.cardKit.cardMessageId = result.messageId;
             this.flush.setCardMessageReady(true);
+            // Register for pause button callback
+            registerPauseTarget(result.messageId, () => this.abortCard());
             if (!this.transition('streaming', 'ensureCardCreated.cardkit')) {
               this.disposeShutdownHook?.();
               this.disposeShutdownHook = null;
@@ -975,6 +982,8 @@ export class StreamingCardController {
 
           this.cardKit.cardMessageId = result.messageId;
           this.flush.setCardMessageReady(true);
+          // Register for pause button callback
+          registerPauseTarget(result.messageId, () => this.abortCard());
           if (!this.transition('streaming', 'ensureCardCreated.imFallback')) {
             return;
           }

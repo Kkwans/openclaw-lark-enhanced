@@ -30,6 +30,8 @@ import { buildQueueKey, enqueueFeishuChatTask, getActiveDispatcher, hasActiveTas
 import { extractRawTextFromEvent, isLikelyAbortText } from './abort-detect';
 import type { MonitorContext } from './types';
 import { dispatchFeishuPluginInteractiveHandler } from './interactive-dispatch';
+import { triggerPauseByMessageId } from '../card/pause-registry';
+import { PAUSE_ACTION_ID } from '../card/builder';
 
 const elog = larkLogger('channel/event-handlers');
 
@@ -414,9 +416,39 @@ export async function handleCardActionEvent(ctx: MonitorContext, data: unknown):
     const authResult = await handleCardAction(data, ctx.cfg, ctx.accountId);
     if (authResult !== undefined) return authResult;
 
+    // Streaming pause button: abort active streaming card
+    const pauseResult = await handlePauseAction(data);
+    if (pauseResult !== undefined) return pauseResult;
+
     // 业务自定义卡片交互：使用 SDK 标准 interactive dispatch 管道转发给业务插件。
     return await dispatchFeishuPluginInteractiveHandler({ cfg: ctx.cfg, accountId: ctx.accountId, data });
   } catch (err) {
     elog.warn(`card.action.trigger handler error: ${err}`);
   }
+}
+
+/**
+ * Handle streaming pause button click.
+ * Extracts the message ID from the event and triggers abort on the active streaming controller.
+ */
+async function handlePauseAction(data: unknown): Promise<Record<string, unknown> | undefined> {
+  const ev = data as {
+    action?: { value?: { action?: string } };
+    open_message_id?: string;
+    context?: { open_message_id?: string };
+  };
+  const actionValue = ev.action?.value?.action;
+  if (actionValue !== PAUSE_ACTION_ID) return undefined;
+
+  const messageId = ev.open_message_id ?? ev.context?.open_message_id;
+  if (!messageId) {
+    elog.warn('pause action: missing message_id');
+    return { toast: { type: 'error', content: '操作失败：无法识别消息' } };
+  }
+
+  const triggered = await triggerPauseByMessageId(messageId);
+  if (triggered) {
+    return { toast: { type: 'info', content: '已暂停生成' } };
+  }
+  return { toast: { type: 'warning', content: '生成已完成或已暂停' } };
 }
