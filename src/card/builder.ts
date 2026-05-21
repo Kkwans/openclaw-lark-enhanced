@@ -11,6 +11,7 @@
 import { optimizeMarkdownStyle } from './markdown-style';
 import type { FooterSessionMetrics } from './reply-dispatcher-types';
 import { EMPTY_TOOL_USE_PLACEHOLDER, type ToolUseDisplayStep } from './tool-use-display';
+import { FOOTER_ELEMENT_ID } from './streaming-footer';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -696,6 +697,16 @@ export function buildStreamingPreAnswerCard(params: {
       size: '16px 16px',
     },
     element_id: 'loading_icon',
+  });
+
+  // Divider + footer placeholder (content will be streamed via cardElement.content())
+  elements.push({ tag: 'hr' });
+  elements.push({
+    tag: 'markdown',
+    content: ' ',
+    text_size: 'notation',
+    text_align: 'center',
+    element_id: FOOTER_ELEMENT_ID,
   });
 
   return {

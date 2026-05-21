@@ -64,6 +64,7 @@ import {
   THROTTLE_CONSTANTS,
 } from './reply-dispatcher-types';
 import { UnavailableGuard } from './unavailable-guard';
+import { StreamingFooterManager, FOOTER_ELEMENT_ID, buildFooterElement, buildDividerElement } from './streaming-footer';
 
 const log = larkLogger('card/streaming');
 
@@ -115,6 +116,7 @@ export class StreamingCardController {
   private readonly flush: FlushController;
   private readonly guard: UnavailableGuard;
   private readonly imageResolver: ImageResolver;
+  private readonly streamingFooter: StreamingFooterManager;
 
   // ---- Lifecycle ----
   private createEpoch = 0;
@@ -284,6 +286,7 @@ export class StreamingCardController {
       },
     });
 
+    this.streamingFooter = new StreamingFooterManager(deps.resolvedFooter);
     this.flush = new FlushController(() => this.performFlush());
 
     this.imageResolver = new ImageResolver({
@@ -460,6 +463,12 @@ export class StreamingCardController {
     if (!this.cardKit.cardMessageId) return;
     this.captureToolUseElapsed();
 
+    // Initialize footer on first deliver
+    if (this.streamingFooter.isEnabled && !this.state_initialized) {
+      this.streamingFooter.init();
+      this.state_initialized = true;
+    }
+
     const split = splitReasoningText(text);
 
     if (split.reasoningText && !split.answerText) {
@@ -590,6 +599,13 @@ export class StreamingCardController {
     await this.ensureCardCreated();
     if (!this.shouldProceed('onPartialReply.postCreate')) return;
     if (!this.cardKit.cardMessageId) return;
+    // Initialize footer on first partial reply
+    if (!this.streamingFooter.isEnabled) {
+      // Footer disabled, just update card
+    } else if (!this.state_initialized) {
+      this.streamingFooter.init();
+      this.state_initialized = true;
+    }
     await this.throttledCardUpdate();
   }
 
@@ -968,6 +984,8 @@ export class StreamingCardController {
   // Internal: flush
   // ------------------------------------------------------------------
 
+  private state_initialized = false;
+
   private async performFlush(): Promise<void> {
     if (!this.cardKit.cardMessageId || this.isTerminalPhase) return;
 
@@ -1006,9 +1024,38 @@ export class StreamingCardController {
           });
           this.text.lastFlushedText = resolvedText;
         }
+
+        // Stream footer update (throttled separately)
+        if (this.streamingFooter.isEnabled && this.streamingFooter.canUpdate()) {
+          const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
+          const footerContent = this.streamingFooter.buildStreamingFooter(footerMetrics);
+          if (footerContent !== null) {
+            try {
+              const prevSeq = this.cardKit.cardKitSequence;
+              this.cardKit.cardKitSequence += 1;
+              log.debug('flushCardUpdate: footer seq bump', {
+                seqBefore: prevSeq,
+                seqAfter: this.cardKit.cardKitSequence,
+              });
+              await streamCardContent({
+                cfg: this.deps.cfg,
+                cardId: this.cardKit.cardKitCardId,
+                elementId: FOOTER_ELEMENT_ID,
+                content: footerContent,
+                sequence: this.cardKit.cardKitSequence,
+                accountId: this.deps.accountId,
+              });
+            } catch (footerErr) {
+              log.debug('footer stream update failed (non-fatal)', { error: String(footerErr) });
+            }
+          }
+        }
       } else {
         log.debug('flushCardUpdate: IM patch fallback');
         const flushDisplay = this.computeToolUseDisplay();
+        // Get footer metrics for IM fallback
+        const imFooterMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
+        const footerContent = this.streamingFooter.isEnabled ? this.streamingFooter.buildStreamingFooter(imFooterMetrics) : null;
         const card = buildCardContent('streaming', {
           text: this.reasoning.isReasoningPhase ? '' : resolvedText,
           reasoningText: this.reasoning.isReasoningPhase ? this.reasoning.accumulatedReasoningText : undefined,
@@ -1016,6 +1063,15 @@ export class StreamingCardController {
           toolUseTitleSuffix: this.computeToolUseTitleSuffix(flushDisplay),
           showToolUse: this.deps.toolUseDisplay.showToolUse,
         });
+        // Append footer to IM card if available
+        if (footerContent) {
+          card.elements.push({ tag: 'hr' });
+          card.elements.push({
+            tag: 'markdown',
+            content: footerContent,
+            text_size: 'notation',
+          });
+        }
         await updateCardFeishu({
           cfg: this.deps.cfg,
           messageId: this.cardKit.cardMessageId,
