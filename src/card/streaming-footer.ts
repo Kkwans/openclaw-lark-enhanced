@@ -16,6 +16,7 @@
 
 import type { FooterSessionMetrics } from './reply-dispatcher-types';
 import { compactNumber, formatElapsed } from './builder';
+import { sessionStatsStore } from './session-stats';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -55,6 +56,8 @@ export interface StreamingFooterConfig {
   context?: boolean;
   /** Show model name. */
   model?: boolean;
+  /** Show session cumulative stats. */
+  sessionStats?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,8 +67,9 @@ export interface StreamingFooterConfig {
 export class StreamingFooterManager {
   private state: FooterState;
   private readonly config: Required<StreamingFooterConfig>;
+  private readonly sessionKey: string | undefined;
 
-  constructor(config?: StreamingFooterConfig) {
+  constructor(config?: StreamingFooterConfig, sessionKey?: string) {
     this.config = {
       status: config?.status ?? false,
       elapsed: config?.elapsed ?? false,
@@ -73,7 +77,9 @@ export class StreamingFooterManager {
       cache: config?.cache ?? false,
       context: config?.context ?? false,
       model: config?.model ?? false,
+      sessionStats: config?.sessionStats ?? false,
     };
+    this.sessionKey = sessionKey;
     this.state = {
       startTime: Date.now(),
       lastContent: '',
@@ -85,6 +91,11 @@ export class StreamingFooterManager {
   /** Whether any footer display is enabled. */
   get isEnabled(): boolean {
     return Object.values(this.config).some(Boolean);
+  }
+
+  /** Get the session key for this footer manager. */
+  get getSessionKey(): string | undefined {
+    return this.sessionKey;
   }
 
   /** Initialize or reset the footer timer. */
@@ -218,6 +229,14 @@ export class StreamingFooterManager {
 
     if (detail.length > 0) {
       lines.push(detail.join(' · '));
+    }
+
+    // Line 3: session cumulative stats
+    if (this.config.sessionStats && this.sessionKey) {
+      const sessionSummary = sessionStatsStore.getSummary(this.sessionKey);
+      if (sessionSummary) {
+        lines.push(sessionSummary.formatted);
+      }
     }
 
     if (lines.length === 0) return '';

@@ -65,6 +65,7 @@ import {
 } from './reply-dispatcher-types';
 import { UnavailableGuard } from './unavailable-guard';
 import { StreamingFooterManager, FOOTER_ELEMENT_ID, buildFooterElement, buildDividerElement } from './streaming-footer';
+import { sessionStatsStore } from './session-stats';
 
 const log = larkLogger('card/streaming');
 
@@ -135,7 +136,7 @@ export class StreamingCardController {
 
   private needsFooterMetrics(): boolean {
     const footer = this.deps.resolvedFooter;
-    return footer.tokens || footer.cache || footer.context || footer.model;
+    return footer.tokens || footer.cache || footer.context || footer.model || footer.sessionStats;
   }
 
   private async getFooterSessionMetrics(): Promise<FooterSessionMetrics | undefined> {
@@ -286,7 +287,7 @@ export class StreamingCardController {
       },
     });
 
-    this.streamingFooter = new StreamingFooterManager(deps.resolvedFooter);
+    this.streamingFooter = new StreamingFooterManager(deps.resolvedFooter, deps.sessionKey);
     this.flush = new FlushController(() => this.performFlush());
 
     this.imageResolver = new ImageResolver({
@@ -623,6 +624,10 @@ export class StreamingCardController {
 
     const errorEffectiveCardId = this.cardKit.cardKitCardId ?? this.cardKit.originalCardKitCardId;
     const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
+    // Accumulate session stats even on error (partial turn still consumed tokens)
+    if (footerMetrics) {
+      sessionStatsStore.accumulate(this.deps.sessionKey, footerMetrics);
+    }
     const toolUseDisplay = this.computeToolUseDisplay();
     try {
       if (this.cardKit.cardMessageId) {
@@ -724,6 +729,11 @@ export class StreamingCardController {
         );
         const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
 
+        // Accumulate session stats for this completed turn
+        if (footerMetrics) {
+          sessionStatsStore.accumulate(this.deps.sessionKey, footerMetrics);
+        }
+
         const completeCard = buildCardContent('complete', {
           text: terminalContent.text,
           reasoningText: terminalContent.reasoningText,
@@ -805,6 +815,10 @@ export class StreamingCardController {
         this.imageResolver,
       );
       const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
+      // Accumulate session stats on abort too
+      if (footerMetrics) {
+        sessionStatsStore.accumulate(this.deps.sessionKey, footerMetrics);
+      }
       if (effectiveCardId) {
         const abortCardContent = buildCardContent('complete', {
           text: terminalContent.text,
