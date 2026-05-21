@@ -50,13 +50,13 @@ describe('formatFooterRuntimeSegments', () => {
       },
     });
 
-    // Primary line: status, elapsed, model
-    expect(result.primaryZh).toEqual(['已完成', '耗时 12.3s', 'claude-opus-4-6']);
-    expect(result.primaryEn).toEqual(['Completed', 'Elapsed 12.3s', 'claude-opus-4-6']);
+    // Primary line: status, elapsed, model (with emoji)
+    expect(result.primaryZh).toEqual(['✅ 已完成', '⏱️ 12.3s', '🤖 claude-opus-4-6']);
+    expect(result.primaryEn).toEqual(['✅ Completed', '⏱️ 12.3s', '🤖 claude-opus-4-6']);
 
-    // Detail line: tokens, cache, context
-    expect(result.detailZh).toEqual(['↑ 1.2k ↓ 3.5k', '缓存 800/200 (36%)', '上下文 4.5k/128k (4%)']);
-    expect(result.detailEn).toEqual(['↑ 1.2k ↓ 3.5k', 'Cache 800/200 (36%)', 'Context 4.5k/128k (4%)']);
+    // Detail line: tokens, cache, context (with emoji)
+    expect(result.detailZh).toEqual(['📊 1.2k↑ 3.5k↓', '🔄 36% cache', '📐 4.5k/128k (4%)']);
+    expect(result.detailEn).toEqual(['📊 1.2k↑ 3.5k↓', '🔄 36% cache', '📐 4.5k/128k (4%)']);
   });
 
   it('respects missing metrics and status variants', () => {
@@ -73,10 +73,10 @@ describe('formatFooterRuntimeSegments', () => {
       },
     });
 
-    expect(stopped.primaryZh).toEqual(['已停止']);
-    expect(stopped.primaryEn).toEqual(['Stopped']);
-    expect(stopped.detailZh).toEqual(['↑ 100 ↓ 50']);
-    expect(stopped.detailEn).toEqual(['↑ 100 ↓ 50']);
+    expect(stopped.primaryZh).toEqual(['⏸️ 已停止']);
+    expect(stopped.primaryEn).toEqual(['⏸️ Stopped']);
+    expect(stopped.detailZh).toEqual(['📊 100↑ 50↓']);
+    expect(stopped.detailEn).toEqual(['📊 100↑ 50↓']);
 
     const errored = formatFooterRuntimeSegments({
       footer: { status: true, elapsed: true },
@@ -84,8 +84,8 @@ describe('formatFooterRuntimeSegments', () => {
       isError: true,
     });
 
-    expect(errored.primaryZh).toEqual(['出错', '耗时 1.0s']);
-    expect(errored.primaryEn).toEqual(['Error', 'Elapsed 1.0s']);
+    expect(errored.primaryZh).toEqual(['❌ 出错', '⏱️ 1.0s']);
+    expect(errored.primaryEn).toEqual(['❌ Error', '⏱️ 1.0s']);
     expect(errored.detailZh).toEqual([]);
     expect(errored.detailEn).toEqual([]);
   });
@@ -128,12 +128,12 @@ describe('buildCardContent – footer line joining', () => {
     const zhContent = (fes[0].i18n_content as Record<string, string>)?.zh_cn;
     const lines = zhContent.split('\n');
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain('已完成');
-    expect(lines[0]).toContain('耗时');
-    expect(lines[0]).toContain('test-model');
-    expect(lines[1]).toContain('↑');
-    expect(lines[1]).toContain('缓存');
-    expect(lines[1]).toContain('上下文');
+    expect(lines[0]).toContain('✅ 已完成');
+    expect(lines[0]).toContain('⏱️');
+    expect(lines[0]).toContain('🤖 test-model');
+    expect(lines[1]).toContain('📊');
+    expect(lines[1]).toContain('🔄');
+    expect(lines[1]).toContain('📐');
   });
 
   it('renders single line when only primary segments exist', () => {

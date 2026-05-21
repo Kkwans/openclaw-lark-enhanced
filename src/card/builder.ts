@@ -237,28 +237,28 @@ export function formatFooterRuntimeSegments(params: {
 
   if (footer?.status) {
     if (isError) {
-      primaryZh.push('出错');
-      primaryEn.push('Error');
+      primaryZh.push('❌ 出错');
+      primaryEn.push('❌ Error');
     } else if (isAborted) {
-      primaryZh.push('已停止');
-      primaryEn.push('Stopped');
+      primaryZh.push('⏸️ 已停止');
+      primaryEn.push('⏸️ Stopped');
     } else {
-      primaryZh.push('已完成');
-      primaryEn.push('Completed');
+      primaryZh.push('✅ 已完成');
+      primaryEn.push('✅ Completed');
     }
   }
 
   if (footer?.elapsed && elapsedMs != null) {
     const d = formatElapsed(elapsedMs);
-    primaryZh.push(`耗时 ${d}`);
-    primaryEn.push(`Elapsed ${d}`);
+    primaryZh.push(`⏱️ ${d}`);
+    primaryEn.push(`⏱️ ${d}`);
   }
 
   if (footer?.model && metrics?.model) {
     const model = metrics.model.trim();
     if (model) {
-      primaryZh.push(model);
-      primaryEn.push(model);
+      primaryZh.push(`🤖 ${model}`);
+      primaryEn.push(`🤖 ${model}`);
     }
   }
 
@@ -270,8 +270,8 @@ export function formatFooterRuntimeSegments(params: {
     if (inTokens != null && outTokens != null) {
       const inLabel = compactNumber(inTokens);
       const outLabel = compactNumber(outTokens);
-      detailZh.push(`↑ ${inLabel} ↓ ${outLabel}`);
-      detailEn.push(`↑ ${inLabel} ↓ ${outLabel}`);
+      detailZh.push(`📊 ${inLabel}↑ ${outLabel}↓`);
+      detailEn.push(`📊 ${inLabel}↑ ${outLabel}↓`);
     }
   }
 
@@ -282,10 +282,8 @@ export function formatFooterRuntimeSegments(params: {
     if (read != null && write != null && inputVal != null) {
       const total = read + write + inputVal;
       const hit = total > 0 ? Math.round((read / total) * 100) : 0;
-      const left = compactNumber(read);
-      const right = compactNumber(write);
-      detailZh.push(`缓存 ${left}/${right} (${hit}%)`);
-      detailEn.push(`Cache ${left}/${right} (${hit}%)`);
+      detailZh.push(`🔄 ${hit}% cache`);
+      detailEn.push(`🔄 ${hit}% cache`);
     }
   }
 
@@ -297,9 +295,8 @@ export function formatFooterRuntimeSegments(params: {
       const totalLabel = compactNumber(total);
       const ctxLabel = compactNumber(ctx);
       const pct = ctx > 0 ? Math.round((total / ctx) * 100) : 0;
-      const pctLabel = `${pct}%`;
-      detailZh.push(`上下文 ${totalLabel}/${ctxLabel} (${pctLabel})`);
-      detailEn.push(`Context ${totalLabel}/${ctxLabel} (${pctLabel})`);
+      detailZh.push(`📐 ${totalLabel}/${ctxLabel} (${pct}%)`);
+      detailEn.push(`📐 ${totalLabel}/${ctxLabel} (${pct}%)`);
     }
   }
 
