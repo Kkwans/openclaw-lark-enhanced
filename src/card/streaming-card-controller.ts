@@ -658,6 +658,9 @@ export class StreamingCardController {
           isError: true,
           footer: this.deps.resolvedFooter,
           footerMetrics,
+          sessionStatsLine: this.deps.resolvedFooter.sessionStats
+            ? sessionStatsStore.getSummary(this.deps.sessionKey)?.formatted
+            : undefined,
         });
         if (errorEffectiveCardId) {
           await this.closeStreamingAndUpdate(errorEffectiveCardId, errorCard, 'onError');
@@ -750,6 +753,9 @@ export class StreamingCardController {
           elapsedMs: this.elapsed(),
           footer: this.deps.resolvedFooter,
           footerMetrics,
+          sessionStatsLine: this.deps.resolvedFooter.sessionStats
+            ? sessionStatsStore.getSummary(this.deps.sessionKey)?.formatted
+            : undefined,
         });
 
         if (idleEffectiveCardId) {
@@ -837,6 +843,9 @@ export class StreamingCardController {
           isAborted: true,
           footer: this.deps.resolvedFooter,
           footerMetrics,
+          sessionStatsLine: this.deps.resolvedFooter.sessionStats
+            ? sessionStatsStore.getSummary(this.deps.sessionKey)?.formatted
+            : undefined,
         });
         await this.closeStreamingAndUpdate(effectiveCardId, abortCardContent, 'abortCard');
         log.info('abortCard completed', { effectiveCardId });
@@ -854,6 +863,9 @@ export class StreamingCardController {
           isAborted: true,
           footer: this.deps.resolvedFooter,
           footerMetrics,
+          sessionStatsLine: this.deps.resolvedFooter.sessionStats
+            ? sessionStatsStore.getSummary(this.deps.sessionKey)?.formatted
+            : undefined,
         });
         await updateCardFeishu({
           cfg: this.deps.cfg,

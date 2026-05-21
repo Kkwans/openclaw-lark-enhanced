@@ -339,6 +339,7 @@ export function buildCardContent(
       monthlyStats?: boolean;
     };
     footerMetrics?: FooterSessionMetrics;
+    sessionStatsLine?: string;
   } = {},
 ): FeishuCard {
   switch (state) {
@@ -365,6 +366,7 @@ export function buildCardContent(
         isAborted: data.isAborted,
         footer: data.footer,
         footerMetrics: data.footerMetrics,
+        sessionStatsLine: data.sessionStatsLine,
       });
     case 'confirm':
       return buildConfirmCard(data.confirmData!);
@@ -461,6 +463,7 @@ function buildCompleteCard(params: {
     monthlyStats?: boolean;
   };
   footerMetrics?: FooterSessionMetrics;
+  sessionStatsLine?: string;
 }): FeishuCard {
   const {
     text,
@@ -475,6 +478,7 @@ function buildCompleteCard(params: {
     isAborted,
     footer,
     footerMetrics,
+    sessionStatsLine,
   } = params;
   const elements: CardElement[] = [];
 
@@ -555,10 +559,9 @@ function buildCompleteCard(params: {
     footerEnLines.push(fp.detailEn.join(' · '));
   }
   // Line 3: session cumulative stats
-  if (footer?.sessionStats) {
-    // Note: sessionKey not available here; stats are rendered by StreamingFooterManager
-    // during streaming. For the terminal card, we skip session stats in builder.ts
-    // to avoid coupling with session state. The streaming footer handles this.
+  if (sessionStatsLine) {
+    footerZhLines.push(sessionStatsLine);
+    footerEnLines.push(sessionStatsLine);
   }
 
   // Line 4: daily + monthly stats
