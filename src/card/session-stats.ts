@@ -247,7 +247,7 @@ class SessionStatsStore {
     const cacheBase = entry.totalCacheRead + entry.totalCacheWrite + entry.totalInputTokens;
     const cacheHitPercent = cacheBase > 0 ? Math.round((entry.totalCacheRead / cacheBase) * 100) : 0;
 
-    let formatted = `📅 今日 ${compactNumber(totalTokens).padStart(6)} (${entry.turnCount} 轮)`;
+    let formatted = `📅 今日 ${String(entry.turnCount + " 轮").padStart(4)} · 🪙 ${compactNumber(totalTokens).padStart(6)}`;
     if (cacheHitPercent > 0) {
       formatted += ` · ⚡ ${String(cacheHitPercent).padStart(3)}%`;
     }
@@ -266,7 +266,7 @@ class SessionStatsStore {
     const cacheBase = entry.totalCacheRead + entry.totalCacheWrite + entry.totalInputTokens;
     const cacheHitPercent = cacheBase > 0 ? Math.round((entry.totalCacheRead / cacheBase) * 100) : 0;
 
-    let formatted = `📆 本月 ${compactNumber(totalTokens).padStart(6)} (${entry.turnCount} 轮)`;
+    let formatted = `📆 本月 ${String(entry.turnCount + " 轮").padStart(4)} · 🪙 ${compactNumber(totalTokens).padStart(6)}`;
     if (cacheHitPercent > 0) {
       formatted += ` · ⚡ ${String(cacheHitPercent).padStart(3)}%`;
     }
@@ -311,7 +311,7 @@ class SessionStatsStore {
 
     const tokenLabel = compactNumber(totalTokens);
     const turnLabel = `${turnCount} 轮`;
-    parts.push(`💬 会话 ${tokenLabel.padStart(6)} (${turnLabel})`);
+    parts.push(`💬 会话 ${turnLabel.padStart(4)} · 🪙 ${tokenLabel.padStart(6)}`);
 
     if (cacheHitPercent > 0) {
       parts.push(`⚡ ${String(cacheHitPercent).padStart(3)}%`);
