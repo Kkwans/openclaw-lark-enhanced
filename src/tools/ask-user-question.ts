@@ -377,10 +377,11 @@ async function injectAnswerSyntheticMessage(ctx: QuestionContext, answers: Recor
   const syntheticMsgId = `${ctx.messageId}:ask-user-answer:${ctx.questionId}`;
 
   // Format answers as readable text for the AI
+  // Use simple format to avoid model parsing issues (especially with mimo)
   const answerLines = Object.entries(answers)
-    .map(([q, a]) => `- ${q}: ${a}`)
+    .map(([q, a]) => `${q}: ${a}`)
     .join('\n');
-  const text = `用户回答了你的问题:\n${answerLines}`;
+  const text = `用户回答了你的问题：\n${answerLines}`;
 
   const syntheticEvent = {
     sender: { sender_id: { open_id: ctx.senderOpenId } },
@@ -450,7 +451,6 @@ async function injectAnswerSyntheticMessage(ctx: QuestionContext, answers: Recor
                 forceMention: true,
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 runtime: syntheticRuntime as any,
-                replyToMessageId: ctx.messageId,
               }),
           );
         },

@@ -7,7 +7,7 @@
 
 /**
  * 优化 Markdown 样式：
- * - 标题降级：H1 → H4，H2~H6 → H5
+ * - 标题降级：H1~H6 → 粗体（飞书卡片 markdown 不支持 ##~###### 标题）
  * - 表格前后增加段落间距
  * - 有序列表：序号后确保只有一个空格
  * - 无序列表："- " 格式规范化（跳过分隔线 ---）
@@ -34,18 +34,14 @@ function _optimizeMarkdownStyle(text: string, cardVersion = 2): string {
   });
 
   // ── 2. 标题降级 ────────────────────────────────────────────────────
-  // 只有当原文档包含 h1~h3 标题时才执行降级
-  // 先处理 H2~H6 → H5，再处理 H1 → H4
-  // 顺序不能颠倒：若先 H1→H4，H4（####）会被后面的 #{2,6} 再次匹配成 H5
-  const hasH1toH3 = /^#{1,3} /m.test(text);
-  if (hasH1toH3) {
-    r = r.replace(/^#{2,6} (.+)$/gm, '##### $1'); // H2~H6 → H5
-    r = r.replace(/^# (.+)$/gm, '#### $1'); // H1 → H4
-  }
+  // Feishu card markdown only supports # (h1) as a heading.
+  // ##~###### are NOT supported and render as plain text.
+  // Strategy: convert ALL headings to bold text for universal support.
+  r = r.replace(/^#{1,6} (.+)$/gm, '**$1**');
 
   if (cardVersion >= 2) {
     // ── 3. 连续标题间增加段落间距 ───────────────────────────────────────
-    r = r.replace(/^(#{4,5} .+)\n{1,2}(#{4,5} )/gm, '$1\n<br>\n$2');
+    r = r.replace(/^(\*\*.+)\n{1,2}(\*\* )/gm, '$1\n<br>\n$2');
 
     // ── 4. 表格前后增加段落间距 ─────────────────────────────────────────
     // 4a. 非表格行直接跟表格行时，先补一个空行
@@ -55,18 +51,18 @@ function _optimizeMarkdownStyle(text: string, cardVersion = 2): string {
     // 4c. 表格后：在表格块末尾追加 <br>（跳过后接分隔线/标题/加粗/文末的情况）
     r = r.replace(/((?:^\|.+\|[^\S\n]*\n?)+)/gm, (m, _table, offset) => {
       const after = r.slice(offset + m.length).replace(/^\n+/, '');
-      if (!after || /^(---|#{4,5} |\*\*)/.test(after)) return m;
+      if (!after || /^(---|\*\*)/.test(after)) return m;
       return m + '\n<br>\n';
     });
     // 4d. 表格前是普通文本（非标题、非加粗行）时，只需 <br>，去掉多余空行
     //     "text\n\n<br>\n\n|" → "text\n<br>\n|"
-    r = r.replace(/^((?!#{4,5} )(?!\*\*).+)\n\n(<br>)\n\n(\|)/gm, '$1\n$2\n$3');
+    r = r.replace(/^((?!\*\*).+)\n\n(<br>)\n\n(\|)/gm, '$1\n$2\n$3');
     // 4d2. 表格前是加粗行时，<br> 紧贴加粗行，空行保留在后面
     //     "**bold**\n\n<br>\n\n|" → "**bold**\n<br>\n\n|"
     r = r.replace(/^(\*\*.+)\n\n(<br>)\n\n(\|)/gm, '$1\n$2\n\n$3');
     // 4e. 表格后是普通文本（非标题、非加粗行）时，只需 <br>，去掉多余空行
     //     "| row |\n\n<br>\ntext" → "| row |\n<br>\ntext"
-    r = r.replace(/(\|[^\n]*\n)\n(<br>\n)((?!#{4,5} )(?!\*\*))/gm, '$1$2$3');
+    r = r.replace(/(\|[^\n]*\n)\n(<br>\n)((?!\*\*))/gm, '$1$2$3');
 
     // ── 5. 还原代码块，并在前后追加 <br> ──────────────────────────────
     codeBlocks.forEach((block, i) => {
