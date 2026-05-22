@@ -34,8 +34,8 @@ describe('StreamingFooterManager with sessionStats', () => {
     });
 
     expect(content).not.toBeNull();
-    expect(content!).toContain('📈 会话:');
-    expect(content!).toContain('cache');
+    expect(content!).toContain('💬 会话');
+    expect(content!).toContain('⚡');
   });
 
   it('should not include session stats when sessionStats is disabled', () => {
@@ -56,7 +56,7 @@ describe('StreamingFooterManager with sessionStats', () => {
     });
 
     expect(content).not.toBeNull();
-    expect(content!).not.toContain('📈 会话:');
+    expect(content!).not.toContain('💬');
   });
 
   it('should not include session stats when sessionKey is not provided', () => {
@@ -78,7 +78,7 @@ describe('StreamingFooterManager with sessionStats', () => {
 
     // Should still render tokens but no session line
     if (content) {
-      expect(content).not.toContain('📈 会话:');
+      expect(content).not.toContain('💬');
     }
   });
 
@@ -102,7 +102,7 @@ describe('StreamingFooterManager with sessionStats', () => {
 
     expect(content).not.toBeNull();
     expect(content!).toContain('✅ 已完成');
-    expect(content!).toContain('📈 会话:');
+    expect(content!).toContain('💬 会话');
   });
 
   it('should expose sessionKey via getter', () => {

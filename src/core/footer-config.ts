@@ -28,8 +28,8 @@ export const DEFAULT_FOOTER_CONFIG: Required<FeishuFooterConfig> = {
   context: false,
   model: false,
   sessionStats: false,
-  dailyStats: false,
-  monthlyStats: false,
+  dailyStats: true,
+  monthlyStats: true,
 };
 
 // ---------------------------------------------------------------------------

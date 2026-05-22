@@ -104,8 +104,8 @@ describe('SessionStatsStore', () => {
       });
 
       const summary = sessionStatsStore.getSummary(testKey);
-      expect(summary!.formatted).toContain('📈 会话:');
-      expect(summary!.formatted).toContain('cache');
+      expect(summary!.formatted).toContain('💬 会话');
+      expect(summary!.formatted).toContain('⚡');
     });
 
     it('should handle zero cache gracefully', () => {

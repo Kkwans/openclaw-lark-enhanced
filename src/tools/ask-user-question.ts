@@ -39,8 +39,8 @@ const log = larkLogger('tools/ask-user-question');
 
 const ACTION_SUBMIT = 'ask_user_submit';
 
-/** TTL for pending questions: auto-expire after 5 minutes. */
-const PENDING_QUESTION_TTL_MS = 5 * 60 * 1000;
+/** TTL for pending questions: auto-expire after 10 minutes. */
+const PENDING_QUESTION_TTL_MS = 10 * 60 * 1000;
 
 /** Max retries for synthetic message injection. */
 const INJECT_MAX_RETRIES = 2;

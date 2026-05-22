@@ -175,7 +175,67 @@ export class StreamingFooterManager {
   ): string {
     const lines: string[] = [];
 
-    // Line 1: status · elapsed · model
+    // --- Layout: stats on top, status on bottom (per user spec) ---
+
+    // Section 1: 会话 · 今日 · 本月 (with separator)
+    const statLines: string[] = [];
+
+    if (this.config.sessionStats && this.sessionKey) {
+      const sessionSummary = sessionStatsStore.getSummary(this.sessionKey);
+      if (sessionSummary) statLines.push(sessionSummary.formatted);
+    }
+    if (this.config.dailyStats) {
+      const dailySummary = sessionStatsStore.getDailySummary();
+      if (dailySummary) statLines.push(dailySummary.formatted);
+    }
+    if (this.config.monthlyStats) {
+      const monthlySummary = sessionStatsStore.getMonthlySummary();
+      if (monthlySummary) statLines.push(monthlySummary.formatted);
+    }
+
+    if (statLines.length > 0) {
+      lines.push(...statLines);
+      lines.push('---');
+    }
+
+    // Section 2: Token · 缓存 · 上下文 (one line)
+    const detail: string[] = [];
+
+    if (this.config.tokens && metrics) {
+      const inTokens = typeof metrics.inputTokens === 'number' ? Math.max(0, metrics.inputTokens) : 0;
+      const outTokens = typeof metrics.outputTokens === 'number' ? Math.max(0, metrics.outputTokens) : 0;
+      const total = inTokens + outTokens;
+      if (total > 0) {
+        detail.push(`🪙 ${compactNumber(total)}`);
+      }
+    }
+
+    if (this.config.cache && metrics) {
+      const read = typeof metrics.cacheRead === 'number' ? Math.max(0, metrics.cacheRead) : undefined;
+      const write = typeof metrics.cacheWrite === 'number' ? Math.max(0, metrics.cacheWrite) : undefined;
+      const inputVal = typeof metrics.inputTokens === 'number' ? Math.max(0, metrics.inputTokens) : undefined;
+      if (read != null && write != null && inputVal != null) {
+        const total = read + write + inputVal;
+        const hit = total > 0 ? Math.round((read / total) * 100) : 0;
+        detail.push(`⚡ ${hit}%`);
+      }
+    }
+
+    if (this.config.context && metrics) {
+      const freshTotal = metrics.totalTokensFresh === false ? undefined : metrics.totalTokens;
+      const used = typeof freshTotal === 'number' ? Math.max(0, freshTotal) : undefined;
+      const limit = typeof metrics.contextTokens === 'number' ? Math.max(0, metrics.contextTokens) : undefined;
+      if (used != null && limit != null && limit > 0) {
+        const pct = Math.round((used / limit) * 100);
+        detail.push(`🧠 ${compactNumber(used)}/${compactNumber(limit)} (${pct}%)`);
+      }
+    }
+
+    if (detail.length > 0) {
+      lines.push(detail.join(' · '));
+    }
+
+    // Section 3: status · 耗时 · 模型
     const primary: string[] = [];
 
     if (this.config.status) {
@@ -192,85 +252,16 @@ export class StreamingFooterManager {
     }
 
     if (this.config.elapsed) {
-      const d = formatElapsed(elapsedMs);
-      primary.push(`⏱️ ${d}`);
+      primary.push(`⏱️ ${formatElapsed(elapsedMs)}`);
     }
 
     if (this.config.model && metrics?.model) {
       const model = metrics.model.trim();
-      if (model) {
-        primary.push(`🤖 ${model}`);
-      }
+      if (model) primary.push(`🤖 ${model}`);
     }
 
     if (primary.length > 0) {
       lines.push(primary.join(' · '));
-    }
-
-    // Line 2: tokens · cache · context
-    const detail: string[] = [];
-
-    if (this.config.tokens && metrics) {
-      const inTokens = typeof metrics.inputTokens === 'number' ? Math.max(0, metrics.inputTokens) : undefined;
-      const outTokens = typeof metrics.outputTokens === 'number' ? Math.max(0, metrics.outputTokens) : undefined;
-      if (inTokens != null || outTokens != null) {
-        const inLabel = inTokens != null ? compactNumber(inTokens) : '-';
-        const outLabel = outTokens != null ? compactNumber(outTokens) : '-';
-        detail.push(`📊 ${inLabel}↑ ${outLabel}↓`);
-      }
-    }
-
-    if (this.config.cache && metrics) {
-      const read = typeof metrics.cacheRead === 'number' ? Math.max(0, metrics.cacheRead) : undefined;
-      const write = typeof metrics.cacheWrite === 'number' ? Math.max(0, metrics.cacheWrite) : undefined;
-      const inputVal = typeof metrics.inputTokens === 'number' ? Math.max(0, metrics.inputTokens) : undefined;
-      if (read != null && write != null && inputVal != null) {
-        const total = read + write + inputVal;
-        const hit = total > 0 ? Math.round((read / total) * 100) : 0;
-        detail.push(`🔄 ${hit}% cache`);
-      }
-    }
-
-    if (this.config.context && metrics) {
-      const freshTotal = metrics.totalTokensFresh === false ? undefined : metrics.totalTokens;
-      const total = typeof freshTotal === 'number' ? Math.max(0, freshTotal) : undefined;
-      const ctx = typeof metrics.contextTokens === 'number' ? Math.max(0, metrics.contextTokens) : undefined;
-      if (total != null && ctx != null) {
-        const totalLabel = compactNumber(total);
-        const ctxLabel = compactNumber(ctx);
-        const pct = ctx > 0 ? Math.round((total / ctx) * 100) : 0;
-        detail.push(`📐 ${totalLabel}/${ctxLabel} (${pct}%)`);
-      }
-    }
-
-    if (detail.length > 0) {
-      lines.push(detail.join(' · '));
-    }
-
-    // Line 3: session cumulative stats
-    if (this.config.sessionStats && this.sessionKey) {
-      const sessionSummary = sessionStatsStore.getSummary(this.sessionKey);
-      if (sessionSummary) {
-        lines.push(sessionSummary.formatted);
-      }
-    }
-
-    // Line 4: daily + monthly stats
-    const periodParts: string[] = [];
-    if (this.config.dailyStats) {
-      const dailySummary = sessionStatsStore.getDailySummary();
-      if (dailySummary) {
-        periodParts.push(dailySummary.formatted);
-      }
-    }
-    if (this.config.monthlyStats) {
-      const monthlySummary = sessionStatsStore.getMonthlySummary();
-      if (monthlySummary) {
-        periodParts.push(monthlySummary.formatted);
-      }
-    }
-    if (periodParts.length > 0) {
-      lines.push(periodParts.join(' | '));
     }
 
     if (lines.length === 0) return '';

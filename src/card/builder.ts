@@ -229,52 +229,21 @@ export function formatFooterRuntimeSegments(params: {
   elapsedMs?: number;
   isError?: boolean;
   isAborted?: boolean;
-}): { primaryZh: string[]; primaryEn: string[]; detailZh: string[]; detailEn: string[] } {
+}): string[] {
   const { footer, metrics, elapsedMs, isError, isAborted } = params;
-  const primaryZh: string[] = [];
-  const primaryEn: string[] = [];
-  const detailZh: string[] = [];
-  const detailEn: string[] = [];
+  const lines: string[] = [];
 
-  // --- Primary line: status, elapsed, model ---
+  // --- Layout: Token · 缓存 · 上下文 (one line), then status ---
 
-  if (footer?.status) {
-    if (isError) {
-      primaryZh.push('❌ 出错');
-      primaryEn.push('❌ Error');
-    } else if (isAborted) {
-      primaryZh.push('⏸️ 已停止');
-      primaryEn.push('⏸️ Stopped');
-    } else {
-      primaryZh.push('✅ 已完成');
-      primaryEn.push('✅ Completed');
-    }
-  }
-
-  if (footer?.elapsed && elapsedMs != null) {
-    const d = formatElapsed(elapsedMs);
-    primaryZh.push(`⏱️ ${d}`);
-    primaryEn.push(`⏱️ ${d}`);
-  }
-
-  if (footer?.model && metrics?.model) {
-    const model = metrics.model.trim();
-    if (model) {
-      primaryZh.push(`🤖 ${model}`);
-      primaryEn.push(`🤖 ${model}`);
-    }
-  }
-
-  // --- Detail line: tokens, cache, context ---
+  // Line 1: 🪙 Token总量 · ⚡ 缓存命中 · 🧠 上下文
+  const detail: string[] = [];
 
   if (footer?.tokens && metrics) {
-    const inTokens = typeof metrics.inputTokens === 'number' ? Math.max(0, metrics.inputTokens) : undefined;
-    const outTokens = typeof metrics.outputTokens === 'number' ? Math.max(0, metrics.outputTokens) : undefined;
-    if (inTokens != null && outTokens != null) {
-      const inLabel = compactNumber(inTokens);
-      const outLabel = compactNumber(outTokens);
-      detailZh.push(`📊 ${inLabel}↑ ${outLabel}↓`);
-      detailEn.push(`📊 ${inLabel}↑ ${outLabel}↓`);
+    const inTokens = typeof metrics.inputTokens === 'number' ? Math.max(0, metrics.inputTokens) : 0;
+    const outTokens = typeof metrics.outputTokens === 'number' ? Math.max(0, metrics.outputTokens) : 0;
+    const total = inTokens + outTokens;
+    if (total > 0) {
+      detail.push(`🪙 ${compactNumber(total)}`);
     }
   }
 
@@ -285,25 +254,47 @@ export function formatFooterRuntimeSegments(params: {
     if (read != null && write != null && inputVal != null) {
       const total = read + write + inputVal;
       const hit = total > 0 ? Math.round((read / total) * 100) : 0;
-      detailZh.push(`🔄 ${hit}% cache`);
-      detailEn.push(`🔄 ${hit}% cache`);
+      detail.push(`⚡ ${hit}%`);
     }
   }
 
   if (footer?.context && metrics) {
     const freshTotal = metrics.totalTokensFresh === false ? undefined : metrics.totalTokens;
-    const total = typeof freshTotal === 'number' ? Math.max(0, freshTotal) : undefined;
-    const ctx = typeof metrics.contextTokens === 'number' ? Math.max(0, metrics.contextTokens) : undefined;
-    if (total != null && ctx != null) {
-      const totalLabel = compactNumber(total);
-      const ctxLabel = compactNumber(ctx);
-      const pct = ctx > 0 ? Math.round((total / ctx) * 100) : 0;
-      detailZh.push(`📐 ${totalLabel}/${ctxLabel} (${pct}%)`);
-      detailEn.push(`📐 ${totalLabel}/${ctxLabel} (${pct}%)`);
+    const used = typeof freshTotal === 'number' ? Math.max(0, freshTotal) : undefined;
+    const limit = typeof metrics.contextTokens === 'number' ? Math.max(0, metrics.contextTokens) : undefined;
+    if (used != null && limit != null && limit > 0) {
+      const pct = Math.round((used / limit) * 100);
+      detail.push(`🧠 ${compactNumber(used)}/${compactNumber(limit)} (${pct}%)`);
     }
   }
 
-  return { primaryZh, primaryEn, detailZh, detailEn };
+  if (detail.length > 0) lines.push(detail.join(' · '));
+
+  // Line 2: ✅ 已完成 · ⏱️ 耗时 · 🤖 模型
+  const primary: string[] = [];
+
+  if (footer?.status) {
+    if (isError) {
+      primary.push('❌ 出错');
+    } else if (isAborted) {
+      primary.push('⏸️ 已停止');
+    } else {
+      primary.push('✅ 已完成');
+    }
+  }
+
+  if (footer?.elapsed && elapsedMs != null) {
+    primary.push(`⏱️ ${formatElapsed(elapsedMs)}`);
+  }
+
+  if (footer?.model && metrics?.model) {
+    const model = metrics.model.trim();
+    if (model) primary.push(`🤖 ${model}`);
+  }
+
+  if (primary.length > 0) lines.push(primary.join(' · '));
+
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -420,7 +411,7 @@ function buildStreamingCard(
     // Reasoning phase: show reasoning content in notation style
     elements.push({
       tag: 'markdown',
-      content: `💭 **Thinking...**\n\n${reasoningText}`,
+      content: `💭 **思考中...**\n\n${reasoningText}`,
       i18n_content: {
         zh_cn: `💭 **思考中...**\n\n${reasoningText}`,
         en_us: `💭 **Thinking...**\n\n${reasoningText}`,
@@ -435,8 +426,26 @@ function buildStreamingCard(
     });
   }
 
+  // Loading spinner — indicates streaming is in progress
+  elements.push({
+    tag: 'markdown',
+    content: '生成中...',
+    icon: {
+      tag: 'standard_icon',
+      token: 'loading_outlined',
+      color: 'grey',
+      size: '16px 16px',
+    },
+    text_size: 'notation',
+    text_color: 'grey',
+  });
+
   return {
     config: { wide_screen_mode: true, update_multi: true, locales: ['zh_cn', 'en_us'] },
+    header: {
+      title: { tag: 'plain_text', content: '⏳ 回复中' },
+      template: 'turquoise',
+    },
     elements,
   };
 }
@@ -537,50 +546,39 @@ function buildCompleteCard(params: {
     content: optimizeMarkdownStyle(text),
   });
 
-  // Footer meta-info: split into two lines for readability.
-  // Line 1 (primary): status · elapsed · model
-  // Line 2 (detail):  tokens · cache · context
-  const fp = formatFooterRuntimeSegments({
+  // Footer layout: stats on top, separator, then detail + status
+  const footerLines: string[] = [];
+
+  // Section 1: 会话 · 今日 · 本月
+  if (sessionStatsLine) {
+    footerLines.push(sessionStatsLine);
+  }
+  if (footer?.dailyStats) {
+    const dailySummary = sessionStatsStore.getDailySummary();
+    if (dailySummary) footerLines.push(dailySummary.formatted);
+  }
+  if (footer?.monthlyStats) {
+    const monthlySummary = sessionStatsStore.getMonthlySummary();
+    if (monthlySummary) footerLines.push(monthlySummary.formatted);
+  }
+
+  // Section 2: separator
+  if (footerLines.length > 0) {
+    footerLines.push('---');
+  }
+
+  // Section 3: 🪙 Token · ⚡ 缓存 · 🧠 上下文 + ✅ 状态 · ⏱️ 耗时 · 🤖 模型
+  footerLines.push(...formatFooterRuntimeSegments({
     footer,
     metrics: footerMetrics,
     elapsedMs,
     isError,
     isAborted,
-  });
+  }));
 
-  const footerZhLines: string[] = [];
-  const footerEnLines: string[] = [];
-  if (fp.primaryZh.length > 0) {
-    footerZhLines.push(fp.primaryZh.join(' · '));
-    footerEnLines.push(fp.primaryEn.join(' · '));
-  }
-  if (fp.detailZh.length > 0) {
-    footerZhLines.push(fp.detailZh.join(' · '));
-    footerEnLines.push(fp.detailEn.join(' · '));
-  }
-  // Line 3: session cumulative stats
-  if (sessionStatsLine) {
-    footerZhLines.push(sessionStatsLine);
-    footerEnLines.push(sessionStatsLine);
-  }
-
-  // Line 4: daily + monthly stats
-  const periodParts: string[] = [];
-  if (footer?.dailyStats) {
-    const dailySummary = sessionStatsStore.getDailySummary();
-    if (dailySummary) periodParts.push(dailySummary.formatted);
-  }
-  if (footer?.monthlyStats) {
-    const monthlySummary = sessionStatsStore.getMonthlySummary();
-    if (monthlySummary) periodParts.push(monthlySummary.formatted);
-  }
-  if (periodParts.length > 0) {
-    footerZhLines.push(periodParts.join(' | '));
-    footerEnLines.push(periodParts.join(' | '));
-  }
-
-  if (footerZhLines.length > 0) {
-    elements.push(...buildFooter(footerZhLines.join('\n'), footerEnLines.join('\n'), isError));
+  if (footerLines.length > 0) {
+    const footerText = footerLines.join('\n');
+    elements.push(...buildFooter(footerText, footerText, isError));
   }
 
   // Use the answer text as the feed preview summary.
@@ -588,8 +586,16 @@ function buildCompleteCard(params: {
   const summaryText = text.replace(/[*_`#>[\]()~]/g, '').trim();
   const summary = summaryText ? { content: summaryText.slice(0, 120) } : undefined;
 
+  // Header: visual differentiation from streaming state
+  const headerTitle = isError ? '❌ 出错' : isAborted ? '⏸️ 已停止' : '✅ 已完成';
+  const headerTemplate = isError ? 'red' : isAborted ? 'orange' : 'green';
+
   return {
     config: { wide_screen_mode: true, update_multi: true, locales: ['zh_cn', 'en_us'], summary },
+    header: {
+      title: { tag: 'plain_text', content: headerTitle },
+      template: headerTemplate,
+    },
     elements,
   };
 }
@@ -750,8 +756,9 @@ export function buildStreamingPreAnswerCard(params: {
     tag: 'markdown',
     content: ' ',
     icon: {
-      tag: 'custom_icon',
-      img_key: 'img_v3_02vb_496bec09-4b43-4773-ad6b-0cdd103cd2bg',
+      tag: 'standard_icon',
+      token: 'loading_outlined',
+      color: 'grey',
       size: '16px 16px',
     },
     element_id: 'loading_icon',

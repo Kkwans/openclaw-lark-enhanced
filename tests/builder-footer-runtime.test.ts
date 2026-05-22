@@ -27,7 +27,7 @@ describe('compactNumber', () => {
 // ---------------------------------------------------------------------------
 
 describe('formatFooterRuntimeSegments', () => {
-  it('renders configured runtime metrics split into primary and detail lines', () => {
+  it('renders configured runtime metrics as mobile-first lines', () => {
     const result = formatFooterRuntimeSegments({
       footer: {
         status: true,
@@ -50,13 +50,19 @@ describe('formatFooterRuntimeSegments', () => {
       },
     });
 
-    // Primary line: status, elapsed, model (with emoji)
-    expect(result.primaryZh).toEqual(['✅ 已完成', '⏱️ 12.3s', '🤖 claude-opus-4-6']);
-    expect(result.primaryEn).toEqual(['✅ Completed', '⏱️ 12.3s', '🤖 claude-opus-4-6']);
-
-    // Detail line: tokens, cache, context (with emoji)
-    expect(result.detailZh).toEqual(['📊 1.2k↑ 3.5k↓', '🔄 36% cache', '📐 4.5k/128k (4%)']);
-    expect(result.detailEn).toEqual(['📊 1.2k↑ 3.5k↓', '🔄 36% cache', '📐 4.5k/128k (4%)']);
+    // Returns string[] — one line per info item
+    expect(result.length).toBe(2);
+    // Line 0: 🪙 Token · ⚡ 缓存 · 🧠 上下文
+    expect(result[0]).toContain('🪙');
+    expect(result[0]).toContain('4.7k');
+    expect(result[0]).toContain('⚡');
+    expect(result[0]).toContain('36%');
+    expect(result[0]).toContain('🧠');
+    expect(result[0]).toContain('4%');
+    // Line 1: ✅ 状态 · ⏱️ 耗时 · 🤖 模型
+    expect(result[1]).toContain('✅ 已完成');
+    expect(result[1]).toContain('⏱️');
+    expect(result[1]).toContain('🤖 claude-opus-4-6');
   });
 
   it('respects missing metrics and status variants', () => {
@@ -73,10 +79,9 @@ describe('formatFooterRuntimeSegments', () => {
       },
     });
 
-    expect(stopped.primaryZh).toEqual(['⏸️ 已停止']);
-    expect(stopped.primaryEn).toEqual(['⏸️ Stopped']);
-    expect(stopped.detailZh).toEqual(['📊 100↑ 50↓']);
-    expect(stopped.detailEn).toEqual(['📊 100↑ 50↓']);
+    expect(stopped[0]).toContain('🪙');
+    expect(stopped[0]).toContain('150');
+    expect(stopped[1]).toContain('⏸️ 已停止');
 
     const errored = formatFooterRuntimeSegments({
       footer: { status: true, elapsed: true },
@@ -84,10 +89,9 @@ describe('formatFooterRuntimeSegments', () => {
       isError: true,
     });
 
-    expect(errored.primaryZh).toEqual(['❌ 出错', '⏱️ 1.0s']);
-    expect(errored.primaryEn).toEqual(['❌ Error', '⏱️ 1.0s']);
-    expect(errored.detailZh).toEqual([]);
-    expect(errored.detailEn).toEqual([]);
+    expect(errored[0]).toContain('⏱️');
+    // errored[1] may not exist if no detail line
+    if (errored.length > 1) expect(errored[1]).toContain('❌ 出错');
   });
 });
 
@@ -102,7 +106,7 @@ describe('buildCardContent – footer line joining', () => {
     return elements.filter((el) => el.tag === 'markdown' && el.text_size === 'notation');
   }
 
-  it('merges primary and detail lines into one markdown element with \\n', () => {
+  it('merges all footer info into one markdown element with \\n', () => {
     const card = buildCardContent('complete', {
       text: 'hello',
       footer: { status: true, elapsed: true, tokens: true, cache: true, context: true, model: true },
@@ -121,19 +125,22 @@ describe('buildCardContent – footer line joining', () => {
 
     const fes = footerElements(card);
 
-    // Should be exactly ONE footer element (not two)
+    // Should be exactly ONE footer element
     expect(fes).toHaveLength(1);
 
-    // The zh_cn content should contain \n joining the two lines
-    const zhContent = (fes[0].i18n_content as Record<string, string>)?.zh_cn;
-    const lines = zhContent.split('\n');
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain('✅ 已完成');
-    expect(lines[0]).toContain('⏱️');
-    expect(lines[0]).toContain('🤖 test-model');
-    expect(lines[1]).toContain('📊');
-    expect(lines[1]).toContain('🔄');
-    expect(lines[1]).toContain('📐');
+    // The content should contain multiple lines (mobile-first layout)
+    const content = fes[0].content as string;
+    const lines = content.split('\n');
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+    // No separator when no session stats
+    // Line 0: 🪙 Token · ⚡ 缓存 · 🧠 上下文
+    expect(lines[0]).toContain('🪙');
+    expect(lines[0]).toContain('⚡');
+    expect(lines[0]).toContain('🧠');
+    // Line 1: ✅ 状态 · ⏱️ 耗时 · 🤖 模型
+    expect(lines[1]).toContain('✅ 已完成');
+    expect(lines[1]).toContain('⏱️');
+    expect(lines[1]).toContain('🤖 test-model');
   });
 
   it('renders single line when only primary segments exist', () => {

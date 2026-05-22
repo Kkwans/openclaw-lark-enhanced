@@ -244,7 +244,13 @@ class SessionStatsStore {
     if (!entry || entry.turnCount === 0) return undefined;
 
     const totalTokens = entry.totalInputTokens + entry.totalOutputTokens;
-    const formatted = `📅 今日: ${compactNumber(totalTokens)} tokens (${entry.turnCount} 轮)`;
+    const cacheBase = entry.totalCacheRead + entry.totalCacheWrite + entry.totalInputTokens;
+    const cacheHitPercent = cacheBase > 0 ? Math.round((entry.totalCacheRead / cacheBase) * 100) : 0;
+
+    let formatted = `📅 今日 ${compactNumber(totalTokens).padStart(6)} (${entry.turnCount} 轮)`;
+    if (cacheHitPercent > 0) {
+      formatted += ` · ⚡ ${String(cacheHitPercent).padStart(3)}%`;
+    }
 
     return { totalTokens, formatted };
   }
@@ -257,7 +263,13 @@ class SessionStatsStore {
     if (!entry || entry.turnCount === 0) return undefined;
 
     const totalTokens = entry.totalInputTokens + entry.totalOutputTokens;
-    const formatted = `📆 本月: ${compactNumber(totalTokens)} tokens (${entry.turnCount} 轮)`;
+    const cacheBase = entry.totalCacheRead + entry.totalCacheWrite + entry.totalInputTokens;
+    const cacheHitPercent = cacheBase > 0 ? Math.round((entry.totalCacheRead / cacheBase) * 100) : 0;
+
+    let formatted = `📆 本月 ${compactNumber(totalTokens).padStart(6)} (${entry.turnCount} 轮)`;
+    if (cacheHitPercent > 0) {
+      formatted += ` · ⚡ ${String(cacheHitPercent).padStart(3)}%`;
+    }
 
     return { totalTokens, formatted };
   }
@@ -288,7 +300,7 @@ class SessionStatsStore {
   /**
    * Format the session stats line for footer display.
    *
-   * Example: 📈 会话: 15.2k tokens (3 轮) | 🔄 38% cache
+   * Example: 💬 会话 15.2k tokens (3 轮) | ⚡ 缓存命中 38%
    */
   private formatSessionLine(
     totalTokens: number,
@@ -299,13 +311,13 @@ class SessionStatsStore {
 
     const tokenLabel = compactNumber(totalTokens);
     const turnLabel = `${turnCount} 轮`;
-    parts.push(`📈 会话: ${tokenLabel} tokens (${turnLabel})`);
+    parts.push(`💬 会话 ${tokenLabel.padStart(6)} (${turnLabel})`);
 
     if (cacheHitPercent > 0) {
-      parts.push(`🔄 ${cacheHitPercent}% cache`);
+      parts.push(`⚡ ${String(cacheHitPercent).padStart(3)}%`);
     }
 
-    return parts.join(' | ');
+    return parts.join(' · ');
   }
 
   /**
