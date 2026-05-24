@@ -67,6 +67,9 @@ const FeishuFooterSchema = z
     cache: z.boolean().optional(),
     context: z.boolean().optional(),
     model: z.boolean().optional(),
+    sessionStats: z.boolean().optional(),
+    dailyStats: z.boolean().optional(),
+    monthlyStats: z.boolean().optional(),
   })
   .optional();
 

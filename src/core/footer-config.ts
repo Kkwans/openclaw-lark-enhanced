@@ -9,6 +9,48 @@
  */
 
 import type { FeishuFooterConfig } from './types';
+import { larkLogger } from './lark-logger';
+
+const log = larkLogger('core/footer-config');
+
+// ---------------------------------------------------------------------------
+// Validation & degradation helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Coerce a raw config value to a boolean with graceful degradation.
+ *
+ * Handles common misconfigurations:
+ * - `"true"` / `"false"` strings → boolean
+ * - `0` / `1` numbers → boolean  
+ * - Non-boolean/non-string/non-number → fallback
+ */
+function coerceBoolean(field: string, value: unknown, fallback: boolean): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const lower = value.toLowerCase().trim();
+    if (lower === 'true') return true;
+    if (lower === 'false') return false;
+    log.warn('footer config: invalid string for field, using default', {
+      field,
+      value,
+      fallback,
+    });
+    return fallback;
+  }
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+  if (value != null) {
+    log.warn('footer config: unexpected type for field, using default', {
+      field,
+      type: typeof value,
+      value,
+      fallback,
+    });
+  }
+  return fallback;
+}
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -44,15 +86,19 @@ export const DEFAULT_FOOTER_CONFIG: Required<FeishuFooterConfig> = {
  */
 export function resolveFooterConfig(cfg?: FeishuFooterConfig): Required<FeishuFooterConfig> {
   if (!cfg) return { ...DEFAULT_FOOTER_CONFIG };
-  return {
-    status: cfg.status ?? DEFAULT_FOOTER_CONFIG.status,
-    elapsed: cfg.elapsed ?? DEFAULT_FOOTER_CONFIG.elapsed,
-    tokens: cfg.tokens ?? DEFAULT_FOOTER_CONFIG.tokens,
-    cache: cfg.cache ?? DEFAULT_FOOTER_CONFIG.cache,
-    context: cfg.context ?? DEFAULT_FOOTER_CONFIG.context,
-    model: cfg.model ?? DEFAULT_FOOTER_CONFIG.model,
-    sessionStats: cfg.sessionStats ?? DEFAULT_FOOTER_CONFIG.sessionStats,
-    dailyStats: cfg.dailyStats ?? DEFAULT_FOOTER_CONFIG.dailyStats,
-    monthlyStats: cfg.monthlyStats ?? DEFAULT_FOOTER_CONFIG.monthlyStats,
+
+  const resolved = {
+    status: coerceBoolean('status', cfg.status, DEFAULT_FOOTER_CONFIG.status),
+    elapsed: coerceBoolean('elapsed', cfg.elapsed, DEFAULT_FOOTER_CONFIG.elapsed),
+    tokens: coerceBoolean('tokens', cfg.tokens, DEFAULT_FOOTER_CONFIG.tokens),
+    cache: coerceBoolean('cache', cfg.cache, DEFAULT_FOOTER_CONFIG.cache),
+    context: coerceBoolean('context', cfg.context, DEFAULT_FOOTER_CONFIG.context),
+    model: coerceBoolean('model', cfg.model, DEFAULT_FOOTER_CONFIG.model),
+    sessionStats: coerceBoolean('sessionStats', cfg.sessionStats, DEFAULT_FOOTER_CONFIG.sessionStats),
+    dailyStats: coerceBoolean('dailyStats', cfg.dailyStats, DEFAULT_FOOTER_CONFIG.dailyStats),
+    monthlyStats: coerceBoolean('monthlyStats', cfg.monthlyStats, DEFAULT_FOOTER_CONFIG.monthlyStats),
   };
+
+  log.debug('footer config resolved', { input: cfg, resolved });
+  return resolved;
 }
