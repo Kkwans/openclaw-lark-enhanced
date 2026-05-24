@@ -54,9 +54,10 @@ describe('formatFooterRuntimeSegments', () => {
     expect(result.length).toBe(2);
     // Line 0: 🪙 Token · ⚡ 缓存 · 🧠 上下文
     expect(result[0]).toContain('🪙');
-    expect(result[0]).toContain('4.7k');
+    expect(result[0]).toContain('1.2k');
+    expect(result[0]).toContain('3.5k');
     expect(result[0]).toContain('⚡');
-    expect(result[0]).toContain('36%');
+    expect(result[0]).toContain('67%');
     expect(result[0]).toContain('🧠');
     expect(result[0]).toContain('4%');
     // Line 1: ✅ 状态 · ⏱️ 耗时 · 🤖 模型
@@ -80,7 +81,8 @@ describe('formatFooterRuntimeSegments', () => {
     });
 
     expect(stopped[0]).toContain('🪙');
-    expect(stopped[0]).toContain('150');
+    expect(stopped[0]).toContain('100');
+    expect(stopped[0]).toContain('50');
     expect(stopped[1]).toContain('⏸️ 已停止');
 
     const errored = formatFooterRuntimeSegments({
