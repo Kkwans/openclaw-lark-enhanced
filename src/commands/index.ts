@@ -10,6 +10,8 @@ import { getPluginVersion } from '../core/version';
 import { formatDiagReportText, runDiagnosis } from './diagnose';
 import { runFeishuDoctor } from './doctor';
 import { runFeishuAuth } from './auth';
+import { sessionStatsStore } from '../card/session-stats';
+import { compactNumber } from '../card/builder';
 
 import type { FeishuLocale } from './locale';
 
@@ -32,6 +34,7 @@ const T: Record<
     helpStart: string;
     helpAuth: string;
     helpDoctor: string;
+    helpStats: string;
     helpHelp: string;
     // errors
     diagFailed: (msg: string) => string;
@@ -57,6 +60,7 @@ const T: Record<
     helpStart: '/feishu start - 校验插件配置',
     helpAuth: '/feishu auth - 批量授权用户权限',
     helpDoctor: '/feishu doctor - 运行诊断',
+    helpStats: '/feishu stats - 查看使用统计',
     helpHelp: '/feishu help - 显示此帮助',
     diagFailed: (msg) => `诊断执行失败: ${msg}`,
     authFailed: (msg) => `授权执行失败: ${msg}`,
@@ -81,6 +85,7 @@ const T: Record<
     helpStart: '/feishu start - Validate plugin configuration',
     helpAuth: '/feishu auth - Batch authorize user permissions',
     helpDoctor: '/feishu doctor - Run diagnostics',
+    helpStats: '/feishu stats - View usage statistics',
     helpHelp: '/feishu help - Show this help',
     diagFailed: (msg) => `Diagnostics failed: ${msg}`,
     authFailed: (msg) => `Authorization failed: ${msg}`,
@@ -148,6 +153,7 @@ export function getFeishuHelp(locale: FeishuLocale = 'zh_cn'): string {
     `  ${t.helpStart}\n` +
     `  ${t.helpAuth}\n` +
     `  ${t.helpDoctor}\n` +
+    `  ${t.helpStats}\n` +
     `  ${t.helpHelp}`
   );
 }
@@ -160,6 +166,33 @@ export function getFeishuHelpI18n(): Record<FeishuLocale, string> {
     zh_cn: getFeishuHelp('zh_cn'),
     en_us: getFeishuHelp('en_us'),
   };
+}
+
+/**
+ * 运行 /feishu stats，返回当前使用统计。
+ */
+export function runFeishuStats(): string {
+  const daily = sessionStatsStore.getDailySummary();
+  const monthly = sessionStatsStore.getMonthlySummary();
+
+  const lines: string[] = ['📊 **使用统计**', ''];
+
+  if (daily) {
+    lines.push(daily.formatted);
+  } else {
+    lines.push('📅 今日 暂无数据');
+  }
+
+  if (monthly) {
+    lines.push(monthly.formatted);
+  } else {
+    lines.push('📆 本月 暂无数据');
+  }
+
+  lines.push('');
+  lines.push('_提示：使用 `/feishu stats reset` 重置所有统计_');
+
+  return lines.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -224,7 +257,7 @@ export function registerCommands(api: OpenClawPluginApi): void {
   // /feishu (统一入口，支持子命令)
   api.registerCommand({
     name: 'feishu',
-    description: 'Feishu plugin commands (subcommands: auth, doctor, start)',
+    description: 'Feishu plugin commands (subcommands: auth, doctor, start, stats)',
     acceptsArgs: true,
     requireAuth: true,
     async handler(ctx) {
@@ -247,6 +280,16 @@ export function registerCommands(api: OpenClawPluginApi): void {
         // /feishu start
         if (subcommand === 'start') {
           return { text: runFeishuStart(ctx.config) };
+        }
+
+        // /feishu stats [reset]
+        if (subcommand === 'stats') {
+          const resetArg = args[1]?.toLowerCase();
+          if (resetArg === 'reset') {
+            sessionStatsStore.clearAll();
+            return { text: '✅ 统计数据已重置' };
+          }
+          return { text: runFeishuStats() };
         }
 
         // /feishu help 或无效子命令或无参数
