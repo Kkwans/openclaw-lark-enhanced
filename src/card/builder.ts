@@ -241,20 +241,19 @@ export function formatFooterRuntimeSegments(params: {
   if (footer?.tokens && metrics) {
     const inTokens = typeof metrics.inputTokens === 'number' ? Math.max(0, metrics.inputTokens) : 0;
     const outTokens = typeof metrics.outputTokens === 'number' ? Math.max(0, metrics.outputTokens) : 0;
-    const total = inTokens + outTokens;
-    if (total > 0) {
-      detail.push(`🪙 ${compactNumber(total)}`);
+    if (inTokens > 0 || outTokens > 0) {
+      detail.push(`🪙 ${compactNumber(inTokens)} → ${compactNumber(outTokens)}`);
     }
   }
 
   if (footer?.cache && metrics) {
     const read = typeof metrics.cacheRead === 'number' ? Math.max(0, metrics.cacheRead) : undefined;
-    const write = typeof metrics.cacheWrite === 'number' ? Math.max(0, metrics.cacheWrite) : undefined;
     const inputVal = typeof metrics.inputTokens === 'number' ? Math.max(0, metrics.inputTokens) : undefined;
-    if (read != null && write != null && inputVal != null) {
-      const total = read + write + inputVal;
-      const hit = total > 0 ? Math.round((read / total) * 100) : 0;
+    if (read != null && inputVal != null && inputVal > 0) {
+      const hit = Math.round((read / inputVal) * 100);
       detail.push(`⚡ ${hit}%`);
+    } else if (read != null && read > 0) {
+      detail.push(`⚡ ${compactNumber(read)}`);
     }
   }
 
