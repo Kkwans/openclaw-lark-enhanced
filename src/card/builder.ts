@@ -242,15 +242,17 @@ export function formatFooterRuntimeSegments(params: {
     const inTokens = typeof metrics.inputTokens === 'number' ? Math.max(0, metrics.inputTokens) : 0;
     const outTokens = typeof metrics.outputTokens === 'number' ? Math.max(0, metrics.outputTokens) : 0;
     if (inTokens > 0 || outTokens > 0) {
-      detail.push(`🪙 ${compactNumber(inTokens)} → ${compactNumber(outTokens)}`);
+      detail.push(`🪙 ${compactNumber(inTokens + outTokens)}`);
     }
   }
 
   if (footer?.cache && metrics) {
     const read = typeof metrics.cacheRead === 'number' ? Math.max(0, metrics.cacheRead) : undefined;
     const inputVal = typeof metrics.inputTokens === 'number' ? Math.max(0, metrics.inputTokens) : undefined;
-    if (read != null && inputVal != null && inputVal > 0) {
-      const hit = Math.round((read / inputVal) * 100);
+    const write = typeof metrics.cacheWrite === 'number' ? Math.max(0, metrics.cacheWrite) : 0;
+    if (read != null && inputVal != null) {
+      const totalInput = inputVal + read + write;
+      const hit = totalInput > 0 ? Math.round((read / totalInput) * 100) : 0;
       detail.push(`⚡ ${hit}%`);
     } else if (read != null && read > 0) {
       detail.push(`⚡ ${compactNumber(read)}`);
@@ -297,6 +299,52 @@ export function formatFooterRuntimeSegments(params: {
 }
 
 // ---------------------------------------------------------------------------
+// Completed reasoning collapsible panels
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a collapsible panel for a completed reasoning phase.
+ */
+function buildCompletedReasoningPanel(params: { text: string; elapsedMs: number }): CardElement {
+  const { text, elapsedMs } = params;
+  const dur = elapsedMs > 0 ? formatReasoningDuration(elapsedMs) : null;
+  const zhLabel = dur ? dur.zh : '思考';
+  const enLabel = dur ? dur.en : 'Thought';
+  return {
+    tag: 'collapsible_panel',
+    expanded: false,
+    header: {
+      title: {
+        tag: 'markdown',
+        content: `💭 ${enLabel}`,
+        i18n_content: {
+          zh_cn: `💭 ${zhLabel}`,
+          en_us: `💭 ${enLabel}`,
+        },
+      },
+      vertical_align: 'center',
+      icon: {
+        tag: 'standard_icon',
+        token: 'down-small-ccm_outlined',
+        size: '16px 16px',
+      },
+      icon_position: 'follow_text',
+      icon_expanded_angle: -180,
+    },
+    border: { color: 'grey', corner_radius: '5px' },
+    vertical_spacing: '4px',
+    padding: '6px 6px 6px 6px',
+    elements: [
+      {
+        tag: 'markdown',
+        content: text,
+        text_size: 'notation',
+      },
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // buildCardContent
 // ---------------------------------------------------------------------------
 
@@ -310,6 +358,7 @@ export function buildCardContent(
     text?: string;
     reasoningText?: string;
     reasoningElapsedMs?: number;
+    completedReasonings?: Array<{ text: string; elapsedMs: number }>;
     toolUseSteps?: ToolUseDisplayStep[];
     toolUseTitleSuffix?: { zh: string; en: string };
     toolUseElapsedMs?: number;
@@ -338,6 +387,7 @@ export function buildCardContent(
     case 'streaming':
       return buildStreamingCard(data.text ?? '', {
         reasoningText: data.reasoningText,
+        completedReasonings: data.completedReasonings,
         showToolUse: data.showToolUse,
         toolUseSteps: data.toolUseSteps,
         toolUseTitleSuffix: data.toolUseTitleSuffix,
@@ -349,6 +399,7 @@ export function buildCardContent(
         isError: data.isError,
         reasoningText: data.reasoningText,
         reasoningElapsedMs: data.reasoningElapsedMs,
+        completedReasonings: data.completedReasonings,
         toolUseSteps: data.toolUseSteps,
         toolUseTitleSuffix: data.toolUseTitleSuffix,
         toolUseElapsedMs: data.toolUseElapsedMs,
@@ -389,9 +440,10 @@ function buildStreamingCard(
     toolUseSteps?: ToolUseDisplayStep[];
     toolUseTitleSuffix?: { zh: string; en: string };
     reasoningText?: string;
+    completedReasonings?: Array<{ text: string; elapsedMs: number }>;
   } = {},
 ): FeishuCard {
-  const { showToolUse = true, toolUseSteps, toolUseTitleSuffix, reasoningText } = params;
+  const { showToolUse = true, toolUseSteps, toolUseTitleSuffix, reasoningText, completedReasonings } = params;
   const elements: CardElement[] = [];
   const hasToolUse = Boolean(toolUseSteps?.length);
 
@@ -404,6 +456,13 @@ function buildStreamingCard(
           })
         : buildStreamingToolUsePendingPanel(),
     );
+  }
+
+  // Completed reasoning collapsible blocks (before current content)
+  if (completedReasonings && completedReasonings.length > 0) {
+    for (const r of completedReasonings) {
+      elements.push(buildCompletedReasoningPanel(r));
+    }
   }
 
   if (!partialText && reasoningText) {
@@ -425,18 +484,38 @@ function buildStreamingCard(
     });
   }
 
-  // Loading spinner — indicates streaming is in progress
+  // Loading icon — animated during streaming
   elements.push({
     tag: 'markdown',
-    content: '生成中...',
+    content: ' ',
     icon: {
-      tag: 'standard_icon',
-      token: 'loading_outlined',
-      color: 'grey',
+      tag: 'custom_icon',
+      img_key: 'img_v3_02vb_496bec09-4b43-4773-ad6b-0cdd103cd2bg',
       size: '16px 16px',
     },
-    text_size: 'notation',
-    text_color: 'grey',
+    element_id: 'loading_icon',
+  });
+
+  // Stop button
+  elements.push({
+    tag: 'action',
+    actions: [
+      {
+        tag: 'button',
+        text: {
+          tag: 'plain_text',
+          content: '⏹️ Stop',
+          i18n_content: {
+            zh_cn: '⏹️ 停止',
+            en_us: '⏹️ Stop',
+          },
+        },
+        type: 'default',
+        value: {
+          action: PAUSE_ACTION_ID,
+        },
+      },
+    ],
   });
 
   return {
@@ -455,6 +534,7 @@ function buildCompleteCard(params: {
   isError?: boolean;
   reasoningText?: string;
   reasoningElapsedMs?: number;
+  completedReasonings?: Array<{ text: string; elapsedMs: number }>;
   toolUseSteps?: ToolUseDisplayStep[];
   toolUseTitleSuffix?: { zh: string; en: string };
   toolUseElapsedMs?: number;
@@ -479,6 +559,7 @@ function buildCompleteCard(params: {
     isError,
     reasoningText,
     reasoningElapsedMs,
+    completedReasonings,
     toolUseSteps,
     toolUseTitleSuffix,
     toolUseElapsedMs,
@@ -498,6 +579,13 @@ function buildCompleteCard(params: {
         titleSuffix: toolUseTitleSuffix,
       }),
     );
+  }
+
+  // Completed reasoning collapsible blocks (before current reasoning)
+  if (completedReasonings && completedReasonings.length > 0) {
+    for (const r of completedReasonings) {
+      elements.push(buildCompletedReasoningPanel(r));
+    }
   }
 
   // Collapsible reasoning panel (before main content)
@@ -737,10 +825,10 @@ export function buildStreamingPreAnswerCard(params: {
         tag: 'button',
         text: {
           tag: 'plain_text',
-          content: '⏸️ Stop',
+          content: '⏹️ Stop',
           i18n_content: {
-            zh_cn: '⏸️ 暂停',
-            en_us: '⏸️ Stop',
+            zh_cn: '⏹️ 停止',
+            en_us: '⏹️ Stop',
           },
         },
         type: 'default',
@@ -755,9 +843,8 @@ export function buildStreamingPreAnswerCard(params: {
     tag: 'markdown',
     content: ' ',
     icon: {
-      tag: 'standard_icon',
-      token: 'loading_outlined',
-      color: 'grey',
+      tag: 'custom_icon',
+      img_key: 'img_v3_02vb_496bec09-4b43-4773-ad6b-0cdd103cd2bg',
       size: '16px 16px',
     },
     element_id: 'loading_icon',

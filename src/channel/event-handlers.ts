@@ -448,7 +448,7 @@ async function handlePauseAction(data: unknown): Promise<Record<string, unknown>
 
   const triggered = await triggerPauseByMessageId(messageId);
   if (triggered) {
-    return { toast: { type: 'info', content: '已暂停生成' } };
+    return { toast: { type: 'info', content: '已停止生成' } };
   }
-  return { toast: { type: 'warning', content: '生成已完成或已暂停' } };
+  return { toast: { type: 'warning', content: '生成已完成或已停止' } };
 }

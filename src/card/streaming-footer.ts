@@ -205,15 +205,17 @@ export class StreamingFooterManager {
       const inTokens = typeof metrics.inputTokens === 'number' ? Math.max(0, metrics.inputTokens) : 0;
       const outTokens = typeof metrics.outputTokens === 'number' ? Math.max(0, metrics.outputTokens) : 0;
       if (inTokens > 0 || outTokens > 0) {
-        detail.push(`🪙 ${compactNumber(inTokens)} → ${compactNumber(outTokens)}`);
+        detail.push(`🪙 ${compactNumber(inTokens + outTokens)}`);
       }
     }
 
     if (this.config.cache && metrics) {
       const read = typeof metrics.cacheRead === 'number' ? Math.max(0, metrics.cacheRead) : undefined;
       const inputVal = typeof metrics.inputTokens === 'number' ? Math.max(0, metrics.inputTokens) : undefined;
-      if (read != null && inputVal != null && inputVal > 0) {
-        const hit = Math.round((read / inputVal) * 100);
+      const write = typeof metrics.cacheWrite === 'number' ? Math.max(0, metrics.cacheWrite) : 0;
+      if (read != null && inputVal != null) {
+        const totalInput = inputVal + read + write;
+        const hit = totalInput > 0 ? Math.round((read / totalInput) * 100) : 0;
         detail.push(`⚡ ${hit}%`);
       } else if (read != null && read > 0) {
         detail.push(`⚡ ${compactNumber(read)}`);
@@ -239,12 +241,11 @@ export class StreamingFooterManager {
 
     if (this.config.status) {
       if (state === 'streaming') {
-        const spin = getSpinFrame(elapsedMs);
-        primary.push(`${spin} 生成中`);
+        primary.push('⏳ 生成中');
       } else if (state === 'error') {
         primary.push('❌ 出错');
       } else if (state === 'abort') {
-        primary.push('⏸️ 已停止');
+        primary.push('⏹️ 已停止');
       } else {
         primary.push('✅ 已完成');
       }

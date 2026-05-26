@@ -221,10 +221,9 @@ class SessionStatsStore {
 
     const totalTokens = entry.totalInputTokens + entry.totalOutputTokens;
 
-    // Cache hit = cacheRead / (cacheRead + cacheWrite + inputTokens)
-    // This mirrors the per-turn formula in streaming-footer.ts
-    const cacheBase = entry.totalCacheRead + entry.totalCacheWrite + entry.totalInputTokens;
-    const cacheHitPercent = cacheBase > 0 ? Math.round((entry.totalCacheRead / cacheBase) * 100) : 0;
+    // Cache hit = cacheRead / (inputTokens + cacheRead + cacheWrite) (fraction of total input served from cache)
+    const cacheBase = entry.totalInputTokens + entry.totalCacheRead + entry.totalCacheWrite;
+    const cacheHitPercent = cacheBase > 0 ? Math.min(100, Math.round((entry.totalCacheRead / cacheBase) * 100)) : 0;
 
     const formatted = this.formatSessionLine(totalTokens, cacheHitPercent, entry.turnCount);
 
@@ -244,8 +243,8 @@ class SessionStatsStore {
     if (!entry || entry.turnCount === 0) return undefined;
 
     const totalTokens = entry.totalInputTokens + entry.totalOutputTokens;
-    const cacheBase = entry.totalCacheRead + entry.totalCacheWrite + entry.totalInputTokens;
-    const cacheHitPercent = cacheBase > 0 ? Math.round((entry.totalCacheRead / cacheBase) * 100) : 0;
+    const cacheBase = entry.totalInputTokens + entry.totalCacheRead + entry.totalCacheWrite;
+    const cacheHitPercent = cacheBase > 0 ? Math.min(100, Math.round((entry.totalCacheRead / cacheBase) * 100)) : 0;
 
     let formatted = `📅 今日 ${String(entry.turnCount + " 轮").padStart(4)} · 🪙 ${compactNumber(totalTokens).padStart(6)}`;
     if (cacheHitPercent > 0) {
@@ -263,8 +262,8 @@ class SessionStatsStore {
     if (!entry || entry.turnCount === 0) return undefined;
 
     const totalTokens = entry.totalInputTokens + entry.totalOutputTokens;
-    const cacheBase = entry.totalCacheRead + entry.totalCacheWrite + entry.totalInputTokens;
-    const cacheHitPercent = cacheBase > 0 ? Math.round((entry.totalCacheRead / cacheBase) * 100) : 0;
+    const cacheBase = entry.totalInputTokens + entry.totalCacheRead + entry.totalCacheWrite;
+    const cacheHitPercent = cacheBase > 0 ? Math.min(100, Math.round((entry.totalCacheRead / cacheBase) * 100)) : 0;
 
     let formatted = `📆 本月 ${String(entry.turnCount + " 轮").padStart(4)} · 🪙 ${compactNumber(totalTokens).padStart(6)}`;
     if (cacheHitPercent > 0) {
