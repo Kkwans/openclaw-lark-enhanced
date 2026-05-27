@@ -509,38 +509,10 @@ function buildStreamingCard(
     element_id: 'loading_icon',
   });
 
-  // Stop button
-  elements.push({
-    tag: 'action',
-    actions: [
-      {
-        tag: 'button',
-        text: {
-          tag: 'plain_text',
-          content: '⏹️ 停止',
-          i18n_content: {
-            zh_cn: '⏹️ 停止',
-            en_us: '⏹️ Stop',
-          },
-        },
-        type: 'default',
-        value: {
-          action: PAUSE_ACTION_ID,
-        },
-      },
-    ],
-  });
-
-  // Divider + footer
+  // Structured footer (uses hr + separate elements for proper rendering)
   if (params.footerContent) {
-    elements.push({ tag: 'hr' });
-    elements.push({
-      tag: 'markdown',
-      content: params.footerContent,
-      text_size: 'notation',
-      text_align: 'left',
-      element_id: FOOTER_ELEMENT_ID,
-    });
+    const footerSections = buildStructuredFooter(params.footerContent);
+    elements.push(...footerSections);
   }
 
   return {
@@ -551,6 +523,35 @@ function buildStreamingCard(
     },
     elements,
   };
+}
+
+/**
+ * Build structured footer elements from a footer content string.
+ * The content string uses <br> as line separators and <br>---<br> for section dividers.
+ * Returns an array of CardKit elements: markdown lines + hr dividers.
+ */
+function buildStructuredFooter(content: string): CardElement[] {
+  const elements: CardElement[] = [];
+  // Split by <br>---<br> to get sections
+  const sections = content.split(/<br>---<br>/);
+
+  for (let s = 0; s < sections.length; s++) {
+    if (s > 0) {
+      // Add divider between sections
+      elements.push({ tag: 'hr' });
+    }
+    // Split each section by <br> to get individual lines
+    const lines = sections[s].split(/<br>/).filter(l => l.trim());
+    for (const line of lines) {
+      elements.push({
+        tag: 'markdown',
+        content: line.trim(),
+        text_size: 'notation',
+      });
+    }
+  }
+
+  return elements;
 }
 
 function buildCompleteCard(params: {
@@ -697,7 +698,7 @@ function buildCompleteCard(params: {
 
   if (footerLines.length > 0) {
     const footerText = footerLines.join('<br>');
-    elements.push(...buildFooter(footerText, footerText, isError));
+    elements.push(...buildStructuredFooter(footerText));
   }
 
   // Use the answer text as the feed preview summary.
