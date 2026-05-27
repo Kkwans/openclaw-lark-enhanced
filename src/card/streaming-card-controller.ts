@@ -114,6 +114,8 @@ export class StreamingCardController {
   private completedReasonings: Array<{ text: string; elapsedMs: number }> = [];
   /** Completed output sections (paired with completedReasonings by index). */
   private completedOutputs: string[] = [];
+  /** Text accumulated before the current reasoning phase started. */
+  private textBeforeReasoning: string = '';
 
   private toolUse: ToolUseState = {
     startedAt: null,
@@ -485,6 +487,8 @@ export class StreamingCardController {
 
     if (split.reasoningText && !split.answerText) {
       // Pure reasoning payload
+      // NOTE: Do NOT set textBeforeReasoning here — it's handled by onPartialReply()
+      // when the reasoning→answer transition is detected.
       this.reasoning.reasoningElapsedMs = this.reasoning.reasoningStartTime
         ? Date.now() - this.reasoning.reasoningStartTime
         : 0;
@@ -496,11 +500,13 @@ export class StreamingCardController {
 
     // Answer payload (may also contain inline reasoning from tags)
     // Save completed reasoning as a collapsible block
+    // NOTE: Do NOT push to completedOutputs here — the answer text is the current
+    // output, not the previous one. Outputs are saved in onPartialReply() when
+    // a reasoning→answer transition is detected.
     if (this.reasoning.isReasoningPhase && this.reasoning.accumulatedReasoningText) {
       const elapsed = this.reasoning.reasoningStartTime ? Date.now() - this.reasoning.reasoningStartTime : 0;
       this.completedReasonings.push({ text: this.reasoning.accumulatedReasoningText, elapsedMs: elapsed });
-      // Save the output section that preceded this reasoning
-      this.completedOutputs.push(this.text.accumulatedText || '');
+      this.textBeforeReasoning = '';
       this.text.accumulatedText = '';
       this.text.streamingPrefix = '';
       this.reasoning.accumulatedReasoningText = '';
@@ -585,6 +591,10 @@ export class StreamingCardController {
     const rawText = payload.text ?? '';
     const split = splitReasoningText(rawText);
     if (split.reasoningText) {
+      if (!this.reasoning.isReasoningPhase && this.text.accumulatedText) {
+        // Save text accumulated before reasoning started
+        this.textBeforeReasoning = this.text.accumulatedText;
+      }
       if (!this.reasoning.reasoningStartTime) {
         this.reasoning.reasoningStartTime = Date.now();
       }
@@ -605,7 +615,8 @@ export class StreamingCardController {
       if (this.reasoning.accumulatedReasoningText) {
         this.completedReasonings.push({ text: this.reasoning.accumulatedReasoningText, elapsedMs: elapsed });
         // Save the output section that preceded this reasoning
-        this.completedOutputs.push(this.text.accumulatedText || '');
+        this.completedOutputs.push(this.textBeforeReasoning || this.text.accumulatedText || '');
+        this.textBeforeReasoning = '';
         this.text.accumulatedText = '';
         this.text.streamingPrefix = '';
         this.reasoning.accumulatedReasoningText = '';
@@ -677,6 +688,7 @@ export class StreamingCardController {
           reasoningText: terminalContent.reasoningText,
           reasoningElapsedMs: this.reasoning.reasoningElapsedMs || undefined,
           completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
+          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
           toolUseSteps: toolUseDisplay?.steps,
           toolUseTitleSuffix: this.computeToolUseTitleSuffix(toolUseDisplay),
           toolUseElapsedMs: this.visibleToolUseElapsedMs,
@@ -774,6 +786,7 @@ export class StreamingCardController {
           reasoningText: terminalContent.reasoningText,
           reasoningElapsedMs: this.reasoning.reasoningElapsedMs || undefined,
           completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
+          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
           toolUseSteps: idleToolUseDisplay?.steps,
           toolUseTitleSuffix: this.computeToolUseTitleSuffix(idleToolUseDisplay),
           toolUseElapsedMs: this.visibleToolUseElapsedMs,
@@ -838,14 +851,14 @@ export class StreamingCardController {
       if (!this.transition('aborted', 'abortCard', 'abort')) return;
 
       // transition() already executed onEnterTerminalPhase (cancel + complete + dispose hook)
+      // Save card ID before nulling it
+      const effectiveCardId = this.cardKit.cardKitCardId ?? this.cardKit.originalCardKitCardId;
       // Disable CardKit streaming to prevent concurrent flushes from overwriting the abort card
       this.cardKit.cardKitCardId = null;
       // Wait for any in-flight flush to finish
       await this.flush.waitForFlush();
 
       if (this.cardCreationPromise) await this.cardCreationPromise;
-
-      const effectiveCardId = this.cardKit.cardKitCardId ?? this.cardKit.originalCardKitCardId;
       const elapsedMs = Date.now() - this.dispatchStartTime;
       const abortToolUseDisplay = this.computeToolUseDisplay();
       const terminalContent = prepareTerminalCardContent(
@@ -866,6 +879,7 @@ export class StreamingCardController {
           reasoningText: terminalContent.reasoningText,
           reasoningElapsedMs: this.reasoning.reasoningElapsedMs || undefined,
           completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
+          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
           toolUseSteps: abortToolUseDisplay?.steps,
           toolUseTitleSuffix: this.computeToolUseTitleSuffix(abortToolUseDisplay),
           toolUseElapsedMs: this.visibleToolUseElapsedMs,
@@ -887,6 +901,7 @@ export class StreamingCardController {
           reasoningText: terminalContent.reasoningText,
           reasoningElapsedMs: this.reasoning.reasoningElapsedMs || undefined,
           completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
+          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
           toolUseSteps: abortToolUseDisplay?.steps,
           toolUseTitleSuffix: this.computeToolUseTitleSuffix(abortToolUseDisplay),
           toolUseElapsedMs: this.visibleToolUseElapsedMs,
@@ -1075,7 +1090,10 @@ export class StreamingCardController {
     });
 
     try {
-      const displayText = this.buildDisplayText();
+      // CardKit path uses only current turn text (completed outputs are separate elements)
+      // IM fallback uses full display text (single content element)
+      const isCardKit = !!this.cardKit.cardKitCardId;
+      const displayText = isCardKit ? this.buildCurrentTurnText() : this.buildDisplayText();
       // 流式中间帧使用同步 resolveImages（不等待异步上传）
       const resolvedText = this.imageResolver.resolveImages(displayText);
 
@@ -1087,41 +1105,32 @@ export class StreamingCardController {
             seqBefore: prevSeq,
             seqAfter: this.cardKit.cardKitSequence,
           });
-          await streamCardContent({
+          // Always use full card update for CardKit path
+          // so that completed outputs appear as separate elements.
+          // Footer content is embedded directly in the card structure.
+          const flushDisplay = this.computeToolUseDisplay();
+          const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
+          const footerContent = this.streamingFooter.isEnabled
+            ? this.streamingFooter.buildStreamingFooter(footerMetrics) ?? undefined
+            : undefined;
+          const card = buildCardContent('streaming', {
+            text: this.reasoning.isReasoningPhase ? '' : resolvedText,
+            reasoningText: this.reasoning.isReasoningPhase ? this.reasoning.accumulatedReasoningText : undefined,
+            completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
+            completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
+            toolUseSteps: flushDisplay?.steps,
+            toolUseTitleSuffix: this.computeToolUseTitleSuffix(flushDisplay),
+            showToolUse: this.deps.toolUseDisplay.showToolUse,
+            footerContent,
+          });
+          await updateCardKitCard({
             cfg: this.deps.cfg,
             cardId: this.cardKit.cardKitCardId,
-            elementId: STREAMING_ELEMENT_ID,
-            content: optimizeMarkdownStyle(resolvedText),
+            card: toCardKit2(card),
             sequence: this.cardKit.cardKitSequence,
             accountId: this.deps.accountId,
           });
           this.text.lastFlushedText = resolvedText;
-        }
-
-        // Stream footer update (throttled separately)
-        if (this.streamingFooter.isEnabled && this.streamingFooter.canUpdate()) {
-          const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
-          const footerContent = this.streamingFooter.buildStreamingFooter(footerMetrics);
-          if (footerContent !== null) {
-            try {
-              const prevSeq = this.cardKit.cardKitSequence;
-              this.cardKit.cardKitSequence += 1;
-              log.debug('flushCardUpdate: footer seq bump', {
-                seqBefore: prevSeq,
-                seqAfter: this.cardKit.cardKitSequence,
-              });
-              await streamCardContent({
-                cfg: this.deps.cfg,
-                cardId: this.cardKit.cardKitCardId,
-                elementId: FOOTER_ELEMENT_ID,
-                content: footerContent,
-                sequence: this.cardKit.cardKitSequence,
-                accountId: this.deps.accountId,
-              });
-            } catch (footerErr) {
-              log.debug('footer stream update failed (non-fatal)', { error: String(footerErr) });
-            }
-          }
         }
       } else {
         log.debug('flushCardUpdate: IM patch fallback');
@@ -1133,6 +1142,7 @@ export class StreamingCardController {
           text: this.reasoning.isReasoningPhase ? '' : resolvedText,
           reasoningText: this.reasoning.isReasoningPhase ? this.reasoning.accumulatedReasoningText : undefined,
           completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
+          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
           toolUseSteps: flushDisplay?.steps,
           toolUseTitleSuffix: this.computeToolUseTitleSuffix(flushDisplay),
           showToolUse: this.deps.toolUseDisplay.showToolUse,
@@ -1210,6 +1220,17 @@ export class StreamingCardController {
     }
 
     return sections.join('\n\n');
+  }
+
+  /**
+   * Build text for the current turn only (no completed sections).
+   * Used for CardKit path where completed outputs are rendered as separate elements.
+   */
+  private buildCurrentTurnText(): string {
+    if (this.reasoning.isReasoningPhase && this.reasoning.accumulatedReasoningText) {
+      return `💭 **思考中...**\n\n${this.reasoning.accumulatedReasoningText}`;
+    }
+    return this.text.accumulatedText || '';
   }
 
   private async throttledCardUpdate(): Promise<void> {

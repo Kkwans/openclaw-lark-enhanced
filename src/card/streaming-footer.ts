@@ -28,14 +28,7 @@ export const FOOTER_ELEMENT_ID = 'streaming_footer';
 /** Maximum footer update frequency (ms between updates). */
 const FOOTER_THROTTLE_MS = 500; // 2x/sec
 
-/** Animation frames for streaming status (spinning dot). */
-const SPIN_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
-/** Get the current animation frame based on elapsed time. */
-function getSpinFrame(elapsedMs: number): string {
-  const index = Math.floor(elapsedMs / 300) % SPIN_FRAMES.length;
-  return SPIN_FRAMES[index];
-}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -195,7 +188,7 @@ export class StreamingFooterManager {
 
     if (statLines.length > 0) {
       lines.push(...statLines);
-      lines.push('---');
+      lines.push('<br>---<br>');
     }
 
     // Section 2: Token · 缓存 · 上下文 (one line)
@@ -265,7 +258,7 @@ export class StreamingFooterManager {
     }
 
     if (lines.length === 0) return '';
-    return lines.join('\n');
+    return lines.join('<br>');
   }
 }
 
