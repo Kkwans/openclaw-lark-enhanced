@@ -487,8 +487,10 @@ export class StreamingCardController {
 
     if (split.reasoningText && !split.answerText) {
       // Pure reasoning payload
-      // NOTE: Do NOT set textBeforeReasoning here — it's handled by onPartialReply()
-      // when the reasoning→answer transition is detected.
+      if (!this.reasoning.isReasoningPhase && this.text.accumulatedText) {
+        // Save text accumulated before reasoning started
+        this.textBeforeReasoning = this.text.accumulatedText;
+      }
       this.reasoning.reasoningElapsedMs = this.reasoning.reasoningStartTime
         ? Date.now() - this.reasoning.reasoningStartTime
         : 0;
@@ -500,12 +502,11 @@ export class StreamingCardController {
 
     // Answer payload (may also contain inline reasoning from tags)
     // Save completed reasoning as a collapsible block
-    // NOTE: Do NOT push to completedOutputs here — the answer text is the current
-    // output, not the previous one. Outputs are saved in onPartialReply() when
-    // a reasoning→answer transition is detected.
     if (this.reasoning.isReasoningPhase && this.reasoning.accumulatedReasoningText) {
       const elapsed = this.reasoning.reasoningStartTime ? Date.now() - this.reasoning.reasoningStartTime : 0;
       this.completedReasonings.push({ text: this.reasoning.accumulatedReasoningText, elapsedMs: elapsed });
+      // Save the output that preceded this reasoning
+      this.completedOutputs.push(this.textBeforeReasoning || '');
       this.textBeforeReasoning = '';
       this.text.accumulatedText = '';
       this.text.streamingPrefix = '';

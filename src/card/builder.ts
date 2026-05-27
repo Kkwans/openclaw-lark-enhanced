@@ -509,6 +509,28 @@ function buildStreamingCard(
     element_id: 'loading_icon',
   });
 
+  // Stop button
+  elements.push({
+    tag: 'action',
+    actions: [
+      {
+        tag: 'button',
+        text: {
+          tag: 'plain_text',
+          content: '⏹️ 停止',
+          i18n_content: {
+            zh_cn: '⏹️ 停止',
+            en_us: '⏹️ Stop',
+          },
+        },
+        type: 'default',
+        value: {
+          action: PAUSE_ACTION_ID,
+        },
+      },
+    ],
+  });
+
   // Structured footer (uses hr + separate elements for proper rendering)
   if (params.footerContent) {
     const footerSections = buildStructuredFooter(params.footerContent);
