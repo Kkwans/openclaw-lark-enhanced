@@ -501,12 +501,21 @@ export class StreamingCardController {
     }
 
     // Answer payload (may also contain inline reasoning from tags)
-    // Save completed reasoning as a collapsible block
+    // NOTE: The reasoning→answer transition (saving to completedReasonings +
+    // completedOutputs) is handled by onPartialReply(). Here we only mark
+    // that the reasoning phase is over, and handle consecutive reasoning blocks.
     if (this.reasoning.isReasoningPhase && this.reasoning.accumulatedReasoningText) {
-      const elapsed = this.reasoning.reasoningStartTime ? Date.now() - this.reasoning.reasoningStartTime : 0;
-      this.completedReasonings.push({ text: this.reasoning.accumulatedReasoningText, elapsedMs: elapsed });
-      // Save the output that preceded this reasoning
-      this.completedOutputs.push(this.textBeforeReasoning || '');
+      // If onPartialReply() already saved this reasoning, don't save again.
+      // Check by comparing: if completedReasonings has a newer entry with the
+      // same text, skip. Otherwise save here for deliver-only flows.
+      const lastReasoning = this.completedReasonings[this.completedReasonings.length - 1];
+      const alreadySaved = lastReasoning && lastReasoning.text === this.reasoning.accumulatedReasoningText;
+      if (!alreadySaved) {
+        const elapsed = this.reasoning.reasoningStartTime ? Date.now() - this.reasoning.reasoningStartTime : 0;
+        this.completedReasonings.push({ text: this.reasoning.accumulatedReasoningText, elapsedMs: elapsed });
+        // Don't push to completedOutputs — onPartialReply() handles output pairing
+        this.completedOutputs.push('');
+      }
       this.textBeforeReasoning = '';
       this.text.accumulatedText = '';
       this.text.streamingPrefix = '';
@@ -614,9 +623,20 @@ export class StreamingCardController {
       // Save completed reasoning as a collapsible block
       const elapsed = this.reasoning.reasoningStartTime ? Date.now() - this.reasoning.reasoningStartTime : 0;
       if (this.reasoning.accumulatedReasoningText) {
-        this.completedReasonings.push({ text: this.reasoning.accumulatedReasoningText, elapsedMs: elapsed });
-        // Save the output section that preceded this reasoning
-        this.completedOutputs.push(this.textBeforeReasoning || this.text.accumulatedText || '');
+        // Check if deliver() already saved this reasoning
+        const lastReasoning = this.completedReasonings[this.completedReasonings.length - 1];
+        const alreadySaved = lastReasoning && lastReasoning.text === this.reasoning.accumulatedReasoningText;
+        if (!alreadySaved) {
+          this.completedReasonings.push({ text: this.reasoning.accumulatedReasoningText, elapsedMs: elapsed });
+          // Save the output that preceded this reasoning
+          this.completedOutputs.push(this.textBeforeReasoning || this.text.accumulatedText || '');
+        } else {
+          // deliver() already saved reasoning, but completedOutputs needs the output
+          // Replace the empty string with the actual output
+          if (this.completedOutputs.length > 0 && !this.completedOutputs[this.completedOutputs.length - 1]) {
+            this.completedOutputs[this.completedOutputs.length - 1] = this.textBeforeReasoning || this.text.accumulatedText || '';
+          }
+        }
         this.textBeforeReasoning = '';
         this.text.accumulatedText = '';
         this.text.streamingPrefix = '';

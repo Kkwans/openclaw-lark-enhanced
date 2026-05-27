@@ -559,8 +559,12 @@ function buildStructuredFooter(content: string): CardElement[] {
 
   for (let s = 0; s < sections.length; s++) {
     if (s > 0) {
-      // Add divider between sections
-      elements.push({ tag: 'hr' });
+      // Section divider as a subtle notation line
+      elements.push({
+        tag: 'markdown',
+        content: '---',
+        text_size: 'notation',
+      });
     }
     // Split each section by <br> to get individual lines
     const lines = sections[s].split(/<br>/).filter(l => l.trim());
