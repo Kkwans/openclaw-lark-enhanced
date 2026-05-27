@@ -531,6 +531,28 @@ function buildStreamingCard(
     ],
   });
 
+  // Stop button
+  elements.push({
+    tag: 'action',
+    actions: [
+      {
+        tag: 'button',
+        text: {
+          tag: 'plain_text',
+          content: '⏹️ 停止',
+          i18n_content: {
+            zh_cn: '⏹️ 停止',
+            en_us: '⏹️ Stop',
+          },
+        },
+        type: 'default',
+        value: {
+          action: PAUSE_ACTION_ID,
+        },
+      },
+    ],
+  });
+
   // Structured footer (uses hr + separate elements for proper rendering)
   if (params.footerContent) {
     const footerSections = buildStructuredFooter(params.footerContent);
@@ -559,19 +581,15 @@ function buildStructuredFooter(content: string): CardElement[] {
 
   for (let s = 0; s < sections.length; s++) {
     if (s > 0) {
-      // Section divider as a subtle notation line
-      elements.push({
-        tag: 'markdown',
-        content: '---',
-        text_size: 'notation',
-      });
+      // Section divider (real hr element)
+      elements.push({ tag: 'hr' });
     }
-    // Split each section by <br> to get individual lines
-    const lines = sections[s].split(/<br>/).filter(l => l.trim());
-    for (const line of lines) {
+    // Each section as a single markdown element (lines joined with <br>)
+    const sectionContent = sections[s].split(/<br>/).filter(l => l.trim()).join('<br>');
+    if (sectionContent) {
       elements.push({
         tag: 'markdown',
-        content: line.trim(),
+        content: sectionContent,
         text_size: 'notation',
       });
     }

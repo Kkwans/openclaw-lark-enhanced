@@ -1126,9 +1126,7 @@ export class StreamingCardController {
             seqBefore: prevSeq,
             seqAfter: this.cardKit.cardKitSequence,
           });
-          // Always use full card update for CardKit path
-          // so that completed outputs appear as separate elements.
-          // Footer content is embedded directly in the card structure.
+          // CardKit path: full card update WITHOUT action element (CardKit V2 doesn't support it)
           const flushDisplay = this.computeToolUseDisplay();
           const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
           const footerContent = this.streamingFooter.isEnabled
@@ -1144,10 +1142,21 @@ export class StreamingCardController {
             showToolUse: this.deps.toolUseDisplay.showToolUse,
             footerContent,
           });
+          // Strip action elements (CardKit V2 doesn't support them)
+          const cardKitCard = toCardKit2(card);
+          if (cardKitCard.body && typeof cardKitCard.body === 'object') {
+            const body = cardKitCard.body as { elements?: unknown[] };
+            if (Array.isArray(body.elements)) {
+              body.elements = body.elements.filter((el: unknown) => {
+                const elem = el as { tag?: string };
+                return elem.tag !== 'action';
+              });
+            }
+          }
           await updateCardKitCard({
             cfg: this.deps.cfg,
             cardId: this.cardKit.cardKitCardId,
-            card: toCardKit2(card),
+            card: cardKitCard,
             sequence: this.cardKit.cardKitSequence,
             accountId: this.deps.accountId,
           });
