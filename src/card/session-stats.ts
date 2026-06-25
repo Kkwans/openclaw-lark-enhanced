@@ -32,6 +32,14 @@ export interface MonthlyStatsEntry extends SessionStatsEntry {
   month: string; // YYYY-MM
 }
 
+interface StatsRow {
+  turns: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read: number;
+  cache_write: number;
+}
+
 // ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
@@ -40,41 +48,45 @@ const DB_PATH = process.env.OPENCLAW_SESSION_STATS_DB
   ?? '/root/.openclaw/data/session-stats.db';
 
 let db: DatabaseSync | null = null;
+let dbInitialized = false;
 
 function getDb(): DatabaseSync {
-  if (db) return db;
+  if (db && dbInitialized) return db;
   try {
     db = new DatabaseSync(DB_PATH);
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS session_stats (
-        session_key TEXT PRIMARY KEY,
-        turns INTEGER DEFAULT 0,
-        input_tokens INTEGER DEFAULT 0,
-        output_tokens INTEGER DEFAULT 0,
-        cache_read INTEGER DEFAULT 0,
-        cache_write INTEGER DEFAULT 0,
-        updated_at INTEGER DEFAULT 0
-      );
-      CREATE TABLE IF NOT EXISTS daily_stats (
-        date_key TEXT PRIMARY KEY,
-        turns INTEGER DEFAULT 0,
-        input_tokens INTEGER DEFAULT 0,
-        output_tokens INTEGER DEFAULT 0,
-        cache_read INTEGER DEFAULT 0,
-        cache_write INTEGER DEFAULT 0
-      );
-      CREATE TABLE IF NOT EXISTS monthly_stats (
-        month_key TEXT PRIMARY KEY,
-        turns INTEGER DEFAULT 0,
-        input_tokens INTEGER DEFAULT 0,
-        output_tokens INTEGER DEFAULT 0,
-        cache_read INTEGER DEFAULT 0,
-        cache_write INTEGER DEFAULT 0
-      );
-    `);
-    log.info('session stats database initialized', { path: DB_PATH });
+    if (!dbInitialized) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS session_stats (
+          session_key TEXT PRIMARY KEY,
+          turns INTEGER DEFAULT 0,
+          input_tokens INTEGER DEFAULT 0,
+          output_tokens INTEGER DEFAULT 0,
+          cache_read INTEGER DEFAULT 0,
+          cache_write INTEGER DEFAULT 0,
+          updated_at INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS daily_stats (
+          date_key TEXT PRIMARY KEY,
+          turns INTEGER DEFAULT 0,
+          input_tokens INTEGER DEFAULT 0,
+          output_tokens INTEGER DEFAULT 0,
+          cache_read INTEGER DEFAULT 0,
+          cache_write INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS monthly_stats (
+          month_key TEXT PRIMARY KEY,
+          turns INTEGER DEFAULT 0,
+          input_tokens INTEGER DEFAULT 0,
+          output_tokens INTEGER DEFAULT 0,
+          cache_read INTEGER DEFAULT 0,
+          cache_write INTEGER DEFAULT 0
+        );
+      `);
+      dbInitialized = true;
+      log.info('session stats database initialized', { path: DB_PATH });
+    }
   } catch (err) {
-    log.error('failed to initialize session stats database', { error: err, path: DB_PATH });
+    log.error('failed to initialize session stats database', { error: String(err), path: DB_PATH });
     // Fallback: use in-memory database
     db = new DatabaseSync(':memory:');
     db.exec(`
@@ -104,37 +116,42 @@ function getDb(): DatabaseSync {
         cache_write INTEGER DEFAULT 0
       );
     `);
+    dbInitialized = true;
     log.warn('using in-memory fallback for session stats');
   }
-  return db;
+  return db!;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Get date key in Asia/Shanghai timezone. */
 function todayKey(): string {
   const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
+  // Use Intl to get Asia/Shanghai date parts
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const y = parts.find(p => p.type === 'year')?.value ?? '0000';
+  const m = parts.find(p => p.type === 'month')?.value ?? '00';
+  const d = parts.find(p => p.type === 'day')?.value ?? '00';
   return `${y}-${m}-${d}`;
 }
 
+/** Get month key in Asia/Shanghai timezone. */
 function monthKey(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  return `${y}-${m}`;
+  const today = todayKey();
+  return today.slice(0, 7); // YYYY-MM
 }
 
-function ensureRow(table: string, keyColumn: string, key: string): void {
-  const db = getDb();
-  const existing = db.prepare(`SELECT 1 FROM ${table} WHERE ${keyColumn} = ?`).get(key);
-  if (!existing) {
-    db.prepare(`INSERT INTO ${table} (${keyColumn}) VALUES (?)`).run(key);
-  }
-}
+// Pre-compiled statements for ensureRow (avoid SQL injection from table/column names)
+const ENSURE_SESSION = 'INSERT OR IGNORE INTO session_stats (session_key) VALUES (?)';
+const ENSURE_DAILY = 'INSERT OR IGNORE INTO daily_stats (date_key) VALUES (?)';
+const ENSURE_MONTHLY = 'INSERT OR IGNORE INTO monthly_stats (month_key) VALUES (?)';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -145,7 +162,7 @@ export function incrementSessionStats(
   tokens: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number },
 ): void {
   try {
-    const db = getDb();
+    const d = getDb();
     const dk = todayKey();
     const mk = monthKey();
     const now = Date.now();
@@ -155,9 +172,9 @@ export function incrementSessionStats(
     const cacheRead = tokens.cacheRead ?? 0;
     const cacheWrite = tokens.cacheWrite ?? 0;
 
-    // Session stats
-    ensureRow('session_stats', 'session_key', sessionKey);
-    db.prepare(`
+    // Session stats (upsert)
+    d.prepare(ENSURE_SESSION).run(sessionKey);
+    d.prepare(`
       UPDATE session_stats SET
         turns = turns + 1,
         input_tokens = input_tokens + ?,
@@ -168,9 +185,9 @@ export function incrementSessionStats(
       WHERE session_key = ?
     `).run(input, output, cacheRead, cacheWrite, now, sessionKey);
 
-    // Daily stats
-    ensureRow('daily_stats', 'date_key', dk);
-    db.prepare(`
+    // Daily stats (upsert)
+    d.prepare(ENSURE_DAILY).run(dk);
+    d.prepare(`
       UPDATE daily_stats SET
         turns = turns + 1,
         input_tokens = input_tokens + ?,
@@ -180,9 +197,9 @@ export function incrementSessionStats(
       WHERE date_key = ?
     `).run(input, output, cacheRead, cacheWrite, dk);
 
-    // Monthly stats
-    ensureRow('monthly_stats', 'month_key', mk);
-    db.prepare(`
+    // Monthly stats (upsert)
+    d.prepare(ENSURE_MONTHLY).run(mk);
+    d.prepare(`
       UPDATE monthly_stats SET
         turns = turns + 1,
         input_tokens = input_tokens + ?,
@@ -194,18 +211,18 @@ export function incrementSessionStats(
 
     log.debug('session stats incremented', { sessionKey, input, output, cacheRead, cacheWrite });
   } catch (err) {
-    log.error('failed to increment session stats', { error: err, sessionKey });
+    log.error('failed to increment session stats', { error: String(err), sessionKey });
   }
 }
 
 export function getSessionStats(sessionKey: string): SessionStatsEntry {
   try {
-    const db = getDb();
-    ensureRow('session_stats', 'session_key', sessionKey);
-    const row = db.prepare(`
+    const d = getDb();
+    d.prepare(ENSURE_SESSION).run(sessionKey);
+    const row = d.prepare(`
       SELECT turns, input_tokens, output_tokens, cache_read, cache_write
       FROM session_stats WHERE session_key = ?
-    `).get(sessionKey) as any;
+    `).get(sessionKey) as StatsRow | undefined;
     return {
       turns: row?.turns ?? 0,
       inputTokens: row?.input_tokens ?? 0,
@@ -214,20 +231,20 @@ export function getSessionStats(sessionKey: string): SessionStatsEntry {
       cacheWrite: row?.cache_write ?? 0,
     };
   } catch (err) {
-    log.error('failed to get session stats', { error: err, sessionKey });
+    log.error('failed to get session stats', { error: String(err), sessionKey });
     return { turns: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 };
   }
 }
 
 export function getDailyStats(): DailyStatsEntry {
   try {
-    const db = getDb();
+    const d = getDb();
     const dk = todayKey();
-    ensureRow('daily_stats', 'date_key', dk);
-    const row = db.prepare(`
+    d.prepare(ENSURE_DAILY).run(dk);
+    const row = d.prepare(`
       SELECT turns, input_tokens, output_tokens, cache_read, cache_write
       FROM daily_stats WHERE date_key = ?
-    `).get(dk) as any;
+    `).get(dk) as StatsRow | undefined;
     return {
       date: dk,
       turns: row?.turns ?? 0,
@@ -237,7 +254,7 @@ export function getDailyStats(): DailyStatsEntry {
       cacheWrite: row?.cache_write ?? 0,
     };
   } catch (err) {
-    log.error('failed to get daily stats', { error: err });
+    log.error('failed to get daily stats', { error: String(err) });
     const dk = todayKey();
     return { date: dk, turns: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 };
   }
@@ -245,13 +262,13 @@ export function getDailyStats(): DailyStatsEntry {
 
 export function getMonthlyStats(): MonthlyStatsEntry {
   try {
-    const db = getDb();
+    const d = getDb();
     const mk = monthKey();
-    ensureRow('monthly_stats', 'month_key', mk);
-    const row = db.prepare(`
+    d.prepare(ENSURE_MONTHLY).run(mk);
+    const row = d.prepare(`
       SELECT turns, input_tokens, output_tokens, cache_read, cache_write
       FROM monthly_stats WHERE month_key = ?
-    `).get(mk) as any;
+    `).get(mk) as StatsRow | undefined;
     return {
       month: mk,
       turns: row?.turns ?? 0,
@@ -261,7 +278,7 @@ export function getMonthlyStats(): MonthlyStatsEntry {
       cacheWrite: row?.cache_write ?? 0,
     };
   } catch (err) {
-    log.error('failed to get monthly stats', { error: err });
+    log.error('failed to get monthly stats', { error: String(err) });
     const mk = monthKey();
     return { month: mk, turns: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 };
   }
@@ -273,5 +290,6 @@ export function closeStatsDb(): void {
       db.close();
     } catch { /* ignore */ }
     db = null;
+    dbInitialized = false;
   }
 }

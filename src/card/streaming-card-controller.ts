@@ -148,14 +148,11 @@ export class StreamingCardController {
 
   /** Get last known metrics (synchronous, for terminal state recording). */
   private getLastMetrics(): FooterSessionMetrics | undefined {
-    try {
-      const metrics = this.getFooterSessionMetrics();
-      // getFooterSessionMetrics is async but we need sync - return undefined
-      // The actual metrics will be recorded by the footer's own tracking
-      return undefined;
-    } catch {
-      return undefined;
-    }
+    // In terminal state, we can't await async metrics.
+    // The session stats are already recorded by incrementSessionStats
+    // called from streamingFooter.recordTurnCompletion.
+    // Return undefined to let the footer use its own tracking.
+    return undefined;
   }
 
   private async getFooterSessionMetrics(): Promise<FooterSessionMetrics | undefined> {
@@ -326,9 +323,9 @@ export class StreamingCardController {
         cache: deps.resolvedFooter.cache,
         context: deps.resolvedFooter.context,
         model: deps.resolvedFooter.model,
-        sessionStats: (deps.resolvedFooter as any).sessionStats,
-        dailyStats: (deps.resolvedFooter as any).dailyStats,
-        monthlyStats: (deps.resolvedFooter as any).monthlyStats,
+        sessionStats: deps.resolvedFooter.sessionStats,
+        dailyStats: deps.resolvedFooter.dailyStats,
+        monthlyStats: deps.resolvedFooter.monthlyStats,
       },
       deps.sessionKey,
     );

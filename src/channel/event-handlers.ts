@@ -408,6 +408,8 @@ export async function handleCommentEvent(ctx: MonitorContext, data: unknown): Pr
 // Streaming pause button handler
 // ---------------------------------------------------------------------------
 
+import { getPauseTarget } from '../card/pause-registry';
+
 function handlePauseAction(data: unknown): unknown | undefined {
   try {
     const action = data as { action?: { value?: { action?: string } } };
@@ -415,14 +417,14 @@ function handlePauseAction(data: unknown): unknown | undefined {
     if (actionValue !== 'streaming_pause') return undefined;
 
     // Extract message_id from the card action context
-    const msgId = (data as any)?.open_message_id ?? (data as any)?.action?.open_message_id;
+    const msgId = (data as Record<string, unknown>)?.open_message_id as string
+      ?? (action?.action as Record<string, unknown>)?.open_message_id as string;
     if (!msgId) return undefined;
 
-    const { getPauseTarget } = require('../card/pause-registry');
     const target = getPauseTarget(msgId);
     if (target) {
       target.abortController.abort();
-      log.info('streaming pause triggered', { messageId: msgId });
+      elog.info('streaming pause triggered', { messageId: msgId });
     }
     return {}; // Return empty object to acknowledge the action
   } catch {

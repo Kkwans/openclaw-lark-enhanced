@@ -72,10 +72,12 @@ function formatTokenCount(count: number): string {
   return `${(count / 100000000).toFixed(2)}亿`;
 }
 
-/** Format cache hit rate percentage. */
-function formatCacheRate(read?: number, total?: number): string {
-  if (!total || total <= 0) return '-';
-  const rate = Math.min(100, Math.round((read ?? 0) / total * 100));
+/** Format cache hit rate percentage (matches official formula). */
+function formatCacheRate(read?: number, write?: number, input?: number): string {
+  if (read == null || write == null || input == null) return '-';
+  const total = read + write + input;
+  if (total <= 0) return '-';
+  const rate = Math.min(100, Math.round((read / total) * 100));
   return `${rate}%`;
 }
 
@@ -117,8 +119,8 @@ export class StreamingFooter {
       const daily = getDailyStats();
       const monthly = getMonthlyStats();
       const totalTokens = (t: { inputTokens: number; outputTokens: number }) => t.inputTokens + t.outputTokens;
-      const cacheRate = (t: { cacheRead: number; inputTokens: number }) =>
-        t.inputTokens > 0 ? `${Math.min(100, Math.round(t.cacheRead / t.inputTokens * 100))}%` : '-';
+      const cacheRate = (t: { cacheRead: number; cacheWrite: number; inputTokens: number }) =>
+        formatCacheRate(t.cacheRead, t.cacheWrite, t.inputTokens);
 
       if (config.sessionStats) {
         lines.push(`💬 会话 ${session.turns} 轮 · 🪙 ${formatTokenCount(totalTokens(session))} · ⚡ ${cacheRate(session)}`);
@@ -141,8 +143,9 @@ export class StreamingFooter {
     }
     if (config.cache && metrics) {
       const read = metrics.cacheRead ?? 0;
-      const total = (metrics.inputTokens ?? 0);
-      detailParts.push(`⚡ ${formatCacheRate(read, total)}`);
+      const write = metrics.cacheWrite ?? 0;
+      const input = metrics.inputTokens ?? 0;
+      detailParts.push(`⚡ ${formatCacheRate(read, write, input)}`);
     }
     if (config.context && metrics) {
       const used = metrics.contextTokens ?? 0;
