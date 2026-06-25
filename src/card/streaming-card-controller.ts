@@ -49,6 +49,7 @@ import { type ToolUseDisplayResult, buildToolUseTitleSuffix, normalizeToolUseDis
 import { clearToolUseTraceRun, getToolUseTraceSteps } from './tool-use-trace-store';
 import { StreamingFooter } from './streaming-footer';
 import { registerPauseTarget, unregisterPauseTarget } from './pause-registry';
+import { incrementSessionStats } from './session-stats';
 import type {
   CardKitState,
   CardPhase,
@@ -110,8 +111,8 @@ export class StreamingCardController {
 
   /** Completed reasoning phases (for collapsible thinking blocks). */
   private completedReasonings: Array<{ text: string; elapsedMs: number }> = [];
-  /** Completed output sections (paired with completedReasonings by index). */
-  private completedOutputs: string[] = [];
+  /** Text accumulated at each reasoning boundary (for calculating output per round). */
+  private outputAtReasoningBoundary: string[] = [];
   /** Text accumulated before the current reasoning phase started. */
   private textBeforeReasoning = '';
 
@@ -146,13 +147,51 @@ export class StreamingCardController {
     return footer.tokens || footer.cache || footer.context || footer.model;
   }
 
+  /** Record session statistics for this turn. */
+  private recordSessionStats(): void {
+    try {
+      // Try to get metrics from the runtime
+      const runtime = LarkClient.runtime as Record<string, unknown> | null;
+      const agent = runtime?.agent as Record<string, unknown> | undefined;
+      const session = agent?.session as Record<string, unknown> | undefined;
+      const lastUsage = session?.lastUsage as Record<string, unknown> | undefined;
+
+      if (lastUsage) {
+        incrementSessionStats(this.deps.sessionKey, {
+          input: lastUsage.inputTokens as number | undefined,
+          output: lastUsage.outputTokens as number | undefined,
+          cacheRead: lastUsage.cacheReadTokens as number | undefined,
+          cacheWrite: lastUsage.cacheCreationTokens as number | undefined,
+        });
+      } else {
+        // No usage data available, just record the turn
+        incrementSessionStats(this.deps.sessionKey, {});
+      }
+    } catch {
+      // Best effort - don't fail terminal phase for stats
+      incrementSessionStats(this.deps.sessionKey, {});
+    }
+  }
+
   /** Get last known metrics (synchronous, for terminal state recording). */
-  private getLastMetrics(): FooterSessionMetrics | undefined {
-    // In terminal state, we can't await async metrics.
-    // The session stats are already recorded by incrementSessionStats
-    // called from streamingFooter.recordTurnCompletion.
-    // Return undefined to let the footer use its own tracking.
-    return undefined;
+  /**
+   * Calculate the output text for each completed reasoning round.
+   *
+   * Uses outputAtReasoningBoundary to compute the delta between reasoning rounds.
+   * Returns an array parallel to completedReasonings.
+   */
+  private getCompletedOutputTexts(): string[] {
+    const finalText = this.text.completedText || this.text.accumulatedText || '';
+    const outputs: string[] = [];
+    for (let i = 0; i < this.completedReasonings.length; i++) {
+      const start = this.outputAtReasoningBoundary[i] || '';
+      const end = (i + 1 < this.outputAtReasoningBoundary.length)
+        ? this.outputAtReasoningBoundary[i + 1]
+        : finalText;
+      const output = end.slice(start.length).trim();
+      outputs.push(output);
+    }
+    return outputs;
   }
 
   private async getFooterSessionMetrics(): Promise<FooterSessionMetrics | undefined> {
@@ -459,8 +498,8 @@ export class StreamingCardController {
       unregisterPauseTarget(this.cardKit.cardMessageId);
     }
 
-    // Record session stats
-    this.streamingFooter.recordTurnCompletion(this.getLastMetrics());
+    // Record session stats with available metrics
+    this.recordSessionStats();
 
     if (this.phase === 'terminated' || this.phase === 'creation_failed') {
       clearToolUseTraceRun(this.deps.sessionKey);
@@ -525,7 +564,8 @@ export class StreamingCardController {
       // Save completed reasoning round
       const elapsed = this.reasoning.reasoningStartTime ? Date.now() - this.reasoning.reasoningStartTime : 0;
       this.completedReasonings.push({ text: this.reasoning.accumulatedReasoningText, elapsedMs: elapsed });
-      this.completedOutputs.push(this.textBeforeReasoning || this.text.accumulatedText || '');
+      // Save the accumulated text at this reasoning boundary for output delta calculation
+      this.outputAtReasoningBoundary.push(this.textBeforeReasoning || this.text.accumulatedText || '');
     }
     this.textBeforeReasoning = '';
     this.reasoning.isReasoningPhase = false;
@@ -635,7 +675,8 @@ export class StreamingCardController {
           text: this.reasoning.accumulatedReasoningText,
           elapsedMs: this.reasoning.reasoningElapsedMs,
         });
-        this.completedOutputs.push(this.textBeforeReasoning || '');
+        // Save the accumulated text at this reasoning boundary
+        this.outputAtReasoningBoundary.push(this.textBeforeReasoning || '');
       }
       this.textBeforeReasoning = '';
       this.reasoning.accumulatedReasoningText = '';
@@ -699,7 +740,7 @@ export class StreamingCardController {
           elapsedMs: this.elapsed(),
           isError: true,
           completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
-          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
+          completedOutputs: this.getCompletedOutputTexts().length > 0 ? this.getCompletedOutputTexts() : undefined,
           footer: this.deps.resolvedFooter,
           footerMetrics,
         });
@@ -788,7 +829,7 @@ export class StreamingCardController {
           showToolUse: this.deps.toolUseDisplay.showToolUse,
           elapsedMs: this.elapsed(),
           completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
-          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
+          completedOutputs: this.getCompletedOutputTexts().length > 0 ? this.getCompletedOutputTexts() : undefined,
           footer: this.deps.resolvedFooter,
           footerMetrics,
         });
@@ -873,7 +914,7 @@ export class StreamingCardController {
           elapsedMs,
           isAborted: true,
           completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
-          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
+          completedOutputs: this.getCompletedOutputTexts().length > 0 ? this.getCompletedOutputTexts() : undefined,
           footer: this.deps.resolvedFooter,
           footerMetrics,
         });
@@ -892,7 +933,7 @@ export class StreamingCardController {
           elapsedMs,
           isAborted: true,
           completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
-          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
+          completedOutputs: this.getCompletedOutputTexts().length > 0 ? this.getCompletedOutputTexts() : undefined,
           footer: this.deps.resolvedFooter,
           footerMetrics,
         });
@@ -1076,23 +1117,36 @@ export class StreamingCardController {
       const resolvedText = this.imageResolver.resolveImages(displayText);
 
       if (this.cardKit.cardKitCardId) {
-        if (resolvedText !== this.text.lastFlushedText) {
-          const prevSeq = this.cardKit.cardKitSequence;
-          this.cardKit.cardKitSequence += 1;
-          log.debug('flushCardUpdate: answer seq bump', {
-            seqBefore: prevSeq,
-            seqAfter: this.cardKit.cardKitSequence,
-          });
-          await streamCardContent({
-            cfg: this.deps.cfg,
-            cardId: this.cardKit.cardKitCardId,
-            elementId: STREAMING_ELEMENT_ID,
-            content: optimizeMarkdownStyle(resolvedText),
-            sequence: this.cardKit.cardKitSequence,
-            accountId: this.deps.accountId,
-          });
-          this.text.lastFlushedText = resolvedText;
-        }
+        // CardKit path: update full card via card.update API
+        // (supports all enhanced features: footer, thinking panels, stop button)
+        const flushDisplay = this.computeToolUseDisplay();
+        const footerContent = this.streamingFooter.shouldUpdate()
+          ? this.streamingFooter.buildContent(await this.getFooterSessionMetrics())
+          : undefined;
+        const card = buildCardContent('streaming', {
+          text: this.reasoning.isReasoningPhase ? '' : resolvedText,
+          reasoningText: this.reasoning.isReasoningPhase ? this.reasoning.accumulatedReasoningText : undefined,
+          toolUseSteps: flushDisplay?.steps,
+          toolUseTitleSuffix: this.computeToolUseTitleSuffix(flushDisplay),
+          showToolUse: this.deps.toolUseDisplay.showToolUse,
+          completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
+          completedOutputs: this.getCompletedOutputTexts().length > 0 ? this.getCompletedOutputTexts() : undefined,
+          footerContent,
+        });
+        const prevSeq = this.cardKit.cardKitSequence;
+        this.cardKit.cardKitSequence += 1;
+        log.debug('flushCardUpdate: CardKit full card update', {
+          seqBefore: prevSeq,
+          seqAfter: this.cardKit.cardKitSequence,
+        });
+        await updateCardKitCard({
+          cfg: this.deps.cfg,
+          cardId: this.cardKit.cardKitCardId,
+          card: toCardKit2(card),
+          sequence: this.cardKit.cardKitSequence,
+          accountId: this.deps.accountId,
+        });
+        this.text.lastFlushedText = resolvedText;
       } else {
         log.debug('flushCardUpdate: IM patch fallback');
         const flushDisplay = this.computeToolUseDisplay();
@@ -1107,7 +1161,7 @@ export class StreamingCardController {
           toolUseTitleSuffix: this.computeToolUseTitleSuffix(flushDisplay),
           showToolUse: this.deps.toolUseDisplay.showToolUse,
           completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
-          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
+          completedOutputs: this.getCompletedOutputTexts().length > 0 ? this.getCompletedOutputTexts() : undefined,
           footerContent,
         });
         await updateCardFeishu({

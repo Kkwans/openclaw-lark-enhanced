@@ -821,6 +821,36 @@ export function buildStreamingPreAnswerCard(params: {
     element_id: 'loading_icon',
   });
 
+  // Stop button (will be removed in terminal state)
+  elements.push({
+    tag: 'action',
+    actions: [
+      {
+        tag: 'button',
+        text: {
+          tag: 'plain_text',
+          content: '⏹️ 停止',
+          i18n_content: {
+            zh_cn: '⏹️ 停止',
+            en_us: '⏹️ Stop',
+          },
+        },
+        type: 'default',
+        value: {
+          action: 'streaming_pause',
+        },
+      },
+    ],
+  });
+
+  // Footer placeholder (will be updated during streaming)
+  elements.push({
+    tag: 'markdown',
+    content: '',
+    text_size: 'notation',
+    element_id: 'streaming_footer',
+  });
+
   return {
     schema: '2.0',
     config: {
