@@ -638,10 +638,14 @@ function buildCompleteCard(params: {
   }
 
   // Full text content (current output)
-  elements.push({
-    tag: 'markdown',
-    content: optimizeMarkdownStyle(text),
-  });
+  // Only render if no completed reasonings (to avoid duplication)
+  // When there are completed reasonings, outputs are already rendered above
+  if (!completedReasonings || completedReasonings.length === 0) {
+    elements.push({
+      tag: 'markdown',
+      content: optimizeMarkdownStyle(text),
+    });
+  }
 
   // Footer meta-info: split into two lines for readability.
   // Line 1 (primary): status · elapsed · model
