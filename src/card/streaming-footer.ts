@@ -113,8 +113,8 @@ export class StreamingFooter {
     const lines: string[] = [];
     const { config } = this;
 
-    // Session / daily / monthly stats
-    if (config.sessionStats || config.dailyStats || config.monthlyStats) {
+    // Session / daily / monthly stats — ONLY show in terminal state
+    if (isTerminal && (config.sessionStats || config.dailyStats || config.monthlyStats)) {
       const session = getSessionStats(this.sessionKey);
       const daily = getDailyStats();
       const monthly = getMonthlyStats();
@@ -148,10 +148,14 @@ export class StreamingFooter {
       detailParts.push(`⚡ ${formatCacheRate(read, write, input)}`);
     }
     if (config.context && metrics) {
-      const used = metrics.contextTokens ?? 0;
-      const model = metrics.model ?? '';
-      // Context window depends on model - show raw numbers
-      detailParts.push(`🧠 ${compactNumber(used)}`);
+      const used = metrics.totalTokens ?? 0;
+      const maxCtx = metrics.contextTokens ?? 0;
+      if (maxCtx > 0) {
+        const pct = Math.round((used / maxCtx) * 100);
+        detailParts.push(`🧠 ${compactNumber(used)}/${compactNumber(maxCtx)} (${pct}%)`);
+      } else {
+        detailParts.push(`🧠 ${compactNumber(used)}`);
+      }
     }
     if (detailParts.length > 0) {
       lines.push(detailParts.join(' · '));
