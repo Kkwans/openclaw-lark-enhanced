@@ -701,6 +701,8 @@ export class StreamingCardController {
           showToolUse: this.deps.toolUseDisplay.showToolUse,
           elapsedMs: this.elapsed(),
           isError: true,
+          completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
+          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
           footer: this.deps.resolvedFooter,
           footerMetrics,
         });
@@ -788,6 +790,8 @@ export class StreamingCardController {
           toolUseElapsedMs: this.visibleToolUseElapsedMs,
           showToolUse: this.deps.toolUseDisplay.showToolUse,
           elapsedMs: this.elapsed(),
+          completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
+          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
           footer: this.deps.resolvedFooter,
           footerMetrics,
         });
@@ -871,6 +875,8 @@ export class StreamingCardController {
           showToolUse: this.deps.toolUseDisplay.showToolUse,
           elapsedMs,
           isAborted: true,
+          completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
+          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
           footer: this.deps.resolvedFooter,
           footerMetrics,
         });
@@ -888,6 +894,8 @@ export class StreamingCardController {
           showToolUse: this.deps.toolUseDisplay.showToolUse,
           elapsedMs,
           isAborted: true,
+          completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
+          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
           footer: this.deps.resolvedFooter,
           footerMetrics,
         });

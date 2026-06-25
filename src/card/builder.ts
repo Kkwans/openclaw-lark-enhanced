@@ -366,6 +366,8 @@ export function buildCardContent(
         toolUseElapsedMs: data.toolUseElapsedMs,
         showToolUse: data.showToolUse,
         isAborted: data.isAborted,
+        completedReasonings: data.completedReasonings,
+        completedOutputs: data.completedOutputs,
         footer: data.footer,
         footerMetrics: data.footerMetrics,
       });
@@ -574,6 +576,8 @@ function buildCompleteCard(params: {
   toolUseElapsedMs?: number;
   showToolUse?: boolean;
   isAborted?: boolean;
+  completedReasonings?: Array<{ text: string; elapsedMs: number }>;
+  completedOutputs?: string[];
   footer?: {
     status?: boolean;
     elapsed?: boolean;
@@ -595,6 +599,8 @@ function buildCompleteCard(params: {
     toolUseElapsedMs,
     showToolUse = true,
     isAborted,
+    completedReasonings,
+    completedOutputs,
     footer,
     footerMetrics,
   } = params;
@@ -610,46 +616,28 @@ function buildCompleteCard(params: {
     );
   }
 
-  // Collapsible reasoning panel (before main content)
-  if (reasoningText) {
-    const dur = reasoningElapsedMs ? formatReasoningDuration(reasoningElapsedMs) : null;
-    const zhLabel = dur ? dur.zh : '思考';
-    const enLabel = dur ? dur.en : 'Thought';
-    elements.push({
-      tag: 'collapsible_panel',
-      expanded: false,
-      header: {
-        title: {
+  // Completed reasoning collapsible blocks + their paired outputs
+  if (completedReasonings && completedReasonings.length > 0) {
+    for (let i = 0; i < completedReasonings.length; i++) {
+      elements.push(buildCompletedReasoningPanel(completedReasonings[i]));
+      if (completedOutputs && completedOutputs[i]) {
+        elements.push({
           tag: 'markdown',
-          content: `💭 ${enLabel}`,
-          i18n_content: {
-            zh_cn: `💭 ${zhLabel}`,
-            en_us: `💭 ${enLabel}`,
-          },
-        },
-        vertical_align: 'center',
-        icon: {
-          tag: 'standard_icon',
-          token: 'down-small-ccm_outlined',
-          size: '16px 16px',
-        },
-        icon_position: 'follow_text',
-        icon_expanded_angle: -180,
-      },
-      border: { color: 'grey', corner_radius: '5px' },
-      vertical_spacing: '8px',
-      padding: '8px 8px 8px 8px',
-      elements: [
-        {
-          tag: 'markdown',
-          content: reasoningText,
-          text_size: 'notation',
-        },
-      ],
-    });
+          content: optimizeMarkdownStyle(completedOutputs[i]),
+        });
+      }
+    }
   }
 
-  // Full text content
+  // Current reasoning (if still in reasoning phase at terminal state)
+  if (reasoningText) {
+    elements.push(buildCompletedReasoningPanel({
+      text: reasoningText,
+      elapsedMs: reasoningElapsedMs ?? 0,
+    }));
+  }
+
+  // Full text content (current output)
   elements.push({
     tag: 'markdown',
     content: optimizeMarkdownStyle(text),
