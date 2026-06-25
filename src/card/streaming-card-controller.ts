@@ -181,7 +181,8 @@ export class StreamingCardController {
    * Returns an array parallel to completedReasonings.
    */
   private getCompletedOutputTexts(): string[] {
-    const finalText = this.text.completedText || this.text.accumulatedText || '';
+    // Use accumulatedText consistently since outputAtReasoningBoundary is built from it
+    const finalText = this.text.accumulatedText || this.text.completedText || '';
     const outputs: string[] = [];
     for (let i = 0; i < this.completedReasonings.length; i++) {
       const start = this.outputAtReasoningBoundary[i] || '';
@@ -561,11 +562,14 @@ export class StreamingCardController {
 
     // Answer payload (may also contain inline reasoning from tags)
     if (this.reasoning.isReasoningPhase && this.reasoning.accumulatedReasoningText) {
-      // Save completed reasoning round
+      // Save completed reasoning round (deduplicate: skip if already pushed)
       const elapsed = this.reasoning.reasoningStartTime ? Date.now() - this.reasoning.reasoningStartTime : 0;
-      this.completedReasonings.push({ text: this.reasoning.accumulatedReasoningText, elapsedMs: elapsed });
-      // Save the accumulated text at this reasoning boundary for output delta calculation
-      this.outputAtReasoningBoundary.push(this.textBeforeReasoning || this.text.accumulatedText || '');
+      const lastReasoning = this.completedReasonings[this.completedReasonings.length - 1];
+      if (!lastReasoning || lastReasoning.text !== this.reasoning.accumulatedReasoningText) {
+        this.completedReasonings.push({ text: this.reasoning.accumulatedReasoningText, elapsedMs: elapsed });
+        // Save the accumulated text at this reasoning boundary for output delta calculation
+        this.outputAtReasoningBoundary.push(this.textBeforeReasoning || this.text.accumulatedText || '');
+      }
     }
     this.textBeforeReasoning = '';
     this.reasoning.isReasoningPhase = false;
@@ -639,31 +643,17 @@ export class StreamingCardController {
   async onPartialReply(payload: ReplyPayload): Promise<void> {
     if (!this.shouldProceed('onPartialReply')) return;
 
-    // Use splitReasoningText (consistent with onDeliver/onReasoningStream)
-    // to extract <think> tag content before stripping it from the answer.
-    // Previously only stripReasoningTags was called, silently discarding
-    // any thinking content that the LLM wrapped in <think> tags.
+    // Strip <think> tags from partial reply text — reasoning content is
+    // already handled by onReasoningStream and onDeliver callbacks.
+    // Processing <think> tags here would create duplicate/fragmented thinking
+    // entries because every partial reply with both thinking and answer text
+    // would save the reasoning again.
     const rawText = payload.text ?? '';
-    const split = splitReasoningText(rawText);
-    if (split.reasoningText) {
-      if (!this.reasoning.reasoningStartTime) {
-        this.reasoning.reasoningStartTime = Date.now();
-      }
-      // Save text before reasoning started
-      if (!this.reasoning.isReasoningPhase && this.text.accumulatedText) {
-        this.textBeforeReasoning = this.text.accumulatedText;
-      }
-      this.reasoning.accumulatedReasoningText = split.reasoningText;
-      this.reasoning.isReasoningPhase = true;
-    }
-    const text = split.answerText ?? stripReasoningTags(rawText);
+    const text = stripReasoningTags(rawText);
     log.debug('onPartialReply', { len: text.length });
     if (!text) return;
 
     this.captureToolUseElapsed();
-    if (!this.reasoning.reasoningStartTime) {
-      this.reasoning.reasoningStartTime = Date.now();
-    }
     if (this.reasoning.isReasoningPhase) {
       this.reasoning.isReasoningPhase = false;
       this.reasoning.reasoningElapsedMs = this.reasoning.reasoningStartTime

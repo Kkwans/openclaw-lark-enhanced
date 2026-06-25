@@ -289,16 +289,15 @@ export function formatFooterRuntimeSegments(params: {
   }
 
   if (footer?.context && metrics) {
-    const freshTotal = metrics.totalTokensFresh === false ? undefined : metrics.totalTokens;
-    const total = typeof freshTotal === 'number' ? Math.max(0, freshTotal) : undefined;
-    const ctx = typeof metrics.contextTokens === 'number' ? Math.max(0, metrics.contextTokens) : undefined;
-    if (total != null && ctx != null) {
-      const totalLabel = compactNumber(total);
-      const ctxLabel = compactNumber(ctx);
-      const pct = ctx > 0 ? Math.round((total / ctx) * 100) : 0;
-      const pctLabel = `${pct}%`;
-      detailZh.push(`上下文 ${totalLabel}/${ctxLabel} (${pctLabel})`);
-      detailEn.push(`Context ${totalLabel}/${ctxLabel} (${pctLabel})`);
+    const used = typeof metrics.totalTokens === 'number' ? Math.max(0, metrics.totalTokens) : undefined;
+    const maxCtx = typeof metrics.contextTokens === 'number' ? Math.max(0, metrics.contextTokens) : undefined;
+    if (used != null && maxCtx != null && maxCtx > 0) {
+      const pct = Math.round((used / maxCtx) * 100);
+      detailZh.push(`🧠 ${compactNumber(used)}/${compactNumber(maxCtx)} (${pct}%)`);
+      detailEn.push(`🧠 ${compactNumber(used)}/${compactNumber(maxCtx)} (${pct}%)`);
+    } else if (used != null) {
+      detailZh.push(`🧠 ${compactNumber(used)}`);
+      detailEn.push(`🧠 ${compactNumber(used)}`);
     }
   }
 
@@ -551,17 +550,29 @@ function buildStructuredFooter(content: string): CardElement[] {
   const elements: CardElement[] = [];
   const lines = content.split('\n').filter(l => l.trim());
 
-  for (const line of lines) {
-    if (line === '───────────────────') {
-      elements.push({ tag: 'hr' });
-    } else {
+  // Group consecutive non-hr lines into single markdown elements to reduce spacing
+  let pendingTextLines: string[] = [];
+
+  const flushPending = () => {
+    if (pendingTextLines.length > 0) {
       elements.push({
         tag: 'markdown',
-        content: line,
+        content: pendingTextLines.join('\n'),
         text_size: 'notation',
       });
+      pendingTextLines = [];
+    }
+  };
+
+  for (const line of lines) {
+    if (line === '───────────────────') {
+      flushPending();
+      elements.push({ tag: 'hr' });
+    } else {
+      pendingTextLines.push(line);
     }
   }
+  flushPending();
   return elements;
 }
 
@@ -638,13 +649,17 @@ function buildCompleteCard(params: {
   }
 
   // Full text content (current output)
-  // Only render if no completed reasonings (to avoid duplication)
-  // When there are completed reasonings, outputs are already rendered above
-  if (!completedReasonings || completedReasonings.length === 0) {
-    elements.push({
-      tag: 'markdown',
-      content: optimizeMarkdownStyle(text),
-    });
+  // When there are completed reasonings, outputs are rendered alongside them.
+  // But if outputs are empty, fallback to main text.
+  const hasNonEmptyOutputs = completedOutputs && completedOutputs.some(o => o.trim().length > 0);
+  if (!completedReasonings || completedReasonings.length === 0 || !hasNonEmptyOutputs) {
+    const alreadyShown = hasNonEmptyOutputs && completedReasonings && completedReasonings.length > 0;
+    if (!alreadyShown) {
+      elements.push({
+        tag: 'markdown',
+        content: optimizeMarkdownStyle(text),
+      });
+    }
   }
 
   // Footer meta-info: split into two lines for readability.
