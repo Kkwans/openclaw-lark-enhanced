@@ -178,4 +178,6 @@ export interface StreamingCardDeps {
   replyInThread: boolean | undefined;
   toolUseDisplay: ToolUseDisplayConfig;
   resolvedFooter: Required<FeishuFooterConfig>;
+  /** AbortController for the stop button. */
+  abortController?: AbortController;
 }

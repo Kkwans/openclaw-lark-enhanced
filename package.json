@@ -1,6 +1,6 @@
 {
   "name": "@larksuite/openclaw-lark",
-  "version": "2026.5.20",
+  "version": "2026.6.10-enhanced",
   "description": "OpenClaw Lark/Feishu channel plugin",
   "type": "module",
   "exports": {

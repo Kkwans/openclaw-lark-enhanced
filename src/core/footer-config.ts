@@ -27,6 +27,9 @@ export const DEFAULT_FOOTER_CONFIG: Required<FeishuFooterConfig> = {
   cache: false,
   context: false,
   model: false,
+  sessionStats: false,
+  dailyStats: false,
+  monthlyStats: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -48,5 +51,8 @@ export function resolveFooterConfig(cfg?: FeishuFooterConfig): Required<FeishuFo
     cache: cfg.cache ?? DEFAULT_FOOTER_CONFIG.cache,
     context: cfg.context ?? DEFAULT_FOOTER_CONFIG.context,
     model: cfg.model ?? DEFAULT_FOOTER_CONFIG.model,
+    sessionStats: cfg.sessionStats ?? DEFAULT_FOOTER_CONFIG.sessionStats,
+    dailyStats: cfg.dailyStats ?? DEFAULT_FOOTER_CONFIG.dailyStats,
+    monthlyStats: cfg.monthlyStats ?? DEFAULT_FOOTER_CONFIG.monthlyStats,
   };
 }

@@ -404,8 +404,38 @@ export async function handleCommentEvent(ctx: MonitorContext, data: unknown): Pr
 // Card action handler
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Streaming pause button handler
+// ---------------------------------------------------------------------------
+
+function handlePauseAction(data: unknown): unknown | undefined {
+  try {
+    const action = data as { action?: { value?: { action?: string } } };
+    const actionValue = action?.action?.value?.action;
+    if (actionValue !== 'streaming_pause') return undefined;
+
+    // Extract message_id from the card action context
+    const msgId = (data as any)?.open_message_id ?? (data as any)?.action?.open_message_id;
+    if (!msgId) return undefined;
+
+    const { getPauseTarget } = require('../card/pause-registry');
+    const target = getPauseTarget(msgId);
+    if (target) {
+      target.abortController.abort();
+      log.info('streaming pause triggered', { messageId: msgId });
+    }
+    return {}; // Return empty object to acknowledge the action
+  } catch {
+    return undefined;
+  }
+}
+
 export async function handleCardActionEvent(ctx: MonitorContext, data: unknown): Promise<unknown> {
   try {
+    // Streaming pause button
+    const pauseResult = handlePauseAction(data);
+    if (pauseResult !== undefined) return pauseResult;
+
     // AskUserQuestion：表单卡片交互（宿主内建能力优先）
     const askResult = handleAskUserAction(data, ctx.cfg, ctx.accountId);
     if (askResult !== undefined) return askResult;

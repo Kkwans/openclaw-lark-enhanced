@@ -327,6 +327,9 @@ export function buildCardContent(
     elapsedMs?: number;
     isError?: boolean;
     isAborted?: boolean;
+    completedReasonings?: Array<{ text: string; elapsedMs: number }>;
+    completedOutputs?: string[];
+    footerContent?: string;
     footer?: {
       status?: boolean;
       elapsed?: boolean;
@@ -347,6 +350,9 @@ export function buildCardContent(
         showToolUse: data.showToolUse,
         toolUseSteps: data.toolUseSteps,
         toolUseTitleSuffix: data.toolUseTitleSuffix,
+        completedReasonings: data.completedReasonings,
+        completedOutputs: data.completedOutputs,
+        footerContent: data.footerContent,
       });
     case 'complete':
       return buildCompleteCard({
@@ -387,6 +393,9 @@ function buildThinkingCard(): FeishuCard {
   };
 }
 
+/** Pause action ID for streaming card stop button. */
+export const PAUSE_ACTION_ID = 'streaming_pause';
+
 function buildStreamingCard(
   partialText: string,
   params: {
@@ -394,9 +403,12 @@ function buildStreamingCard(
     toolUseSteps?: ToolUseDisplayStep[];
     toolUseTitleSuffix?: { zh: string; en: string };
     reasoningText?: string;
+    completedReasonings?: Array<{ text: string; elapsedMs: number }>;
+    completedOutputs?: string[];
+    footerContent?: string;
   } = {},
 ): FeishuCard {
-  const { showToolUse = true, toolUseSteps, toolUseTitleSuffix, reasoningText } = params;
+  const { showToolUse = true, toolUseSteps, toolUseTitleSuffix, reasoningText, completedReasonings, completedOutputs } = params;
   const elements: CardElement[] = [];
   const hasToolUse = Boolean(toolUseSteps?.length);
 
@@ -411,11 +423,24 @@ function buildStreamingCard(
     );
   }
 
+  // Completed reasoning collapsible blocks + their paired outputs
+  if (completedReasonings && completedReasonings.length > 0) {
+    for (let i = 0; i < completedReasonings.length; i++) {
+      elements.push(buildCompletedReasoningPanel(completedReasonings[i]));
+      if (completedOutputs && completedOutputs[i]) {
+        elements.push({
+          tag: 'markdown',
+          content: optimizeMarkdownStyle(completedOutputs[i]),
+        });
+      }
+    }
+  }
+
   if (!partialText && reasoningText) {
     // Reasoning phase: show reasoning content in notation style
     elements.push({
       tag: 'markdown',
-      content: `💭 **Thinking...**\n\n${reasoningText}`,
+      content: `💭 **思考中...**\n\n${reasoningText}`,
       i18n_content: {
         zh_cn: `💭 **思考中...**\n\n${reasoningText}`,
         en_us: `💭 **Thinking...**\n\n${reasoningText}`,
@@ -430,10 +455,112 @@ function buildStreamingCard(
     });
   }
 
+  // Loading icon — animated during streaming
+  elements.push({
+    tag: 'markdown',
+    content: ' ',
+    icon: {
+      tag: 'custom_icon',
+      img_key: 'img_v3_02vb_496bec09-4b43-4773-ad6b-0cdd103cd2bg',
+      size: '16px 16px',
+    },
+    element_id: 'loading_icon',
+  });
+
+  // Stop button
+  elements.push({
+    tag: 'action',
+    actions: [
+      {
+        tag: 'button',
+        text: {
+          tag: 'plain_text',
+          content: '⏹️ 停止',
+          i18n_content: {
+            zh_cn: '⏹️ 停止',
+            en_us: '⏹️ Stop',
+          },
+        },
+        type: 'default',
+        value: {
+          action: PAUSE_ACTION_ID,
+        },
+      },
+    ],
+  });
+
+  // Structured footer (uses hr + separate elements for proper rendering)
+  if (params.footerContent) {
+    const footerSections = buildStructuredFooter(params.footerContent);
+    elements.push(...footerSections);
+  }
+
   return {
     config: { wide_screen_mode: true, update_multi: true, locales: ['zh_cn', 'en_us'] },
+    header: {
+      title: { tag: 'plain_text', content: '⏳ 回复中' },
+      template: 'turquoise',
+    },
     elements,
   };
+}
+
+/** Build a completed reasoning collapsible panel. */
+function buildCompletedReasoningPanel(reasoning: { text: string; elapsedMs: number }): CardElement {
+  const dur = formatReasoningDuration(reasoning.elapsedMs);
+  const zhLabel = dur ? dur.zh : '思考';
+  const enLabel = dur ? dur.en : 'Thought';
+  return {
+    tag: 'collapsible_panel',
+    expanded: false,
+    header: {
+      title: {
+        tag: 'markdown',
+        content: `💭 ${enLabel}`,
+        i18n_content: {
+          zh_cn: `💭 ${zhLabel}`,
+          en_us: `💭 ${enLabel}`,
+        },
+      },
+      vertical_align: 'center',
+      icon: {
+        tag: 'standard_icon',
+        token: 'down-small-ccm_outlined',
+        size: '16px 16px',
+      },
+      icon_position: 'follow_text',
+      icon_expanded_angle: -180,
+    },
+    border: { color: 'grey', corner_radius: '5px' },
+    vertical_spacing: '8px',
+    padding: '8px 8px 8px 8px',
+    elements: [
+      {
+        tag: 'markdown',
+        content: reasoning.text,
+        text_size: 'notation',
+      },
+    ],
+  };
+}
+
+/** Build structured footer elements from a footer content string. */
+function buildStructuredFooter(content: string): CardElement[] {
+  const elements: CardElement[] = [];
+  const lines = content.split('\n').filter(l => l.trim());
+
+  for (const line of lines) {
+    if (line === '───────────────────') {
+      elements.push({ tag: 'hr' });
+    } else {
+      elements.push({
+        tag: 'markdown',
+        content: line,
+        text_size: 'notation',
+      });
+    }
+  }
+  return elements;
 }
 
 function buildCompleteCard(params: {
@@ -558,8 +685,16 @@ function buildCompleteCard(params: {
   const summaryText = text.replace(/[*_`#>[\]()~]/g, '').trim();
   const summary = summaryText ? { content: summaryText.slice(0, 120) } : undefined;
 
+  // Header: visual differentiation from streaming state
+  const headerTitle = isError ? '❌ 出错' : isAborted ? '⏹️ 已停止' : '✅ 已完成';
+  const headerTemplate = isError ? 'red' : isAborted ? 'orange' : 'green';
+
   return {
     config: { wide_screen_mode: true, update_multi: true, locales: ['zh_cn', 'en_us'], summary },
+    header: {
+      title: { tag: 'plain_text', content: headerTitle },
+      template: headerTemplate,
+    },
     elements,
   };
 }

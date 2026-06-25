@@ -100,6 +100,7 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
         replyInThread,
         toolUseDisplay,
         resolvedFooter,
+        abortController: params.abortController,
       })
     : null;
 

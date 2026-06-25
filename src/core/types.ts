@@ -76,6 +76,12 @@ export interface FeishuFooterConfig {
   cache?: boolean;
   context?: boolean;
   model?: boolean;
+  /** Show session cumulative stats (turns + tokens + cache rate). */
+  sessionStats?: boolean;
+  /** Show today stats. */
+  dailyStats?: boolean;
+  /** Show monthly stats. */
+  monthlyStats?: boolean;
 }
 
 // ---------------------------------------------------------------------------

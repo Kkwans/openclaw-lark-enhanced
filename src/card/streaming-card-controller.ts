@@ -47,6 +47,8 @@ import { ImageResolver } from './image-resolver';
 import { optimizeMarkdownStyle } from './markdown-style';
 import { type ToolUseDisplayResult, buildToolUseTitleSuffix, normalizeToolUseDisplay } from './tool-use-display';
 import { clearToolUseTraceRun, getToolUseTraceSteps } from './tool-use-trace-store';
+import { StreamingFooter } from './streaming-footer';
+import { registerPauseTarget, unregisterPauseTarget } from './pause-registry';
 import type {
   CardKitState,
   CardPhase,
@@ -106,6 +108,13 @@ export class StreamingCardController {
     isReasoningPhase: false,
   };
 
+  /** Completed reasoning phases (for collapsible thinking blocks). */
+  private completedReasonings: Array<{ text: string; elapsedMs: number }> = [];
+  /** Completed output sections (paired with completedReasonings by index). */
+  private completedOutputs: string[] = [];
+  /** Text accumulated before the current reasoning phase started. */
+  private textBeforeReasoning = '';
+
   private toolUse: ToolUseState = {
     startedAt: null,
     elapsedMs: 0,
@@ -115,6 +124,7 @@ export class StreamingCardController {
   private readonly flush: FlushController;
   private readonly guard: UnavailableGuard;
   private readonly imageResolver: ImageResolver;
+  private readonly streamingFooter: StreamingFooter;
 
   // ---- Lifecycle ----
   private createEpoch = 0;
@@ -134,6 +144,18 @@ export class StreamingCardController {
   private needsFooterMetrics(): boolean {
     const footer = this.deps.resolvedFooter;
     return footer.tokens || footer.cache || footer.context || footer.model;
+  }
+
+  /** Get last known metrics (synchronous, for terminal state recording). */
+  private getLastMetrics(): FooterSessionMetrics | undefined {
+    try {
+      const metrics = this.getFooterSessionMetrics();
+      // getFooterSessionMetrics is async but we need sync - return undefined
+      // The actual metrics will be recorded by the footer's own tracking
+      return undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private async getFooterSessionMetrics(): Promise<FooterSessionMetrics | undefined> {
@@ -295,6 +317,21 @@ export class StreamingCardController {
         }
       },
     });
+
+    this.streamingFooter = new StreamingFooter(
+      {
+        status: deps.resolvedFooter.status,
+        elapsed: deps.resolvedFooter.elapsed,
+        tokens: deps.resolvedFooter.tokens,
+        cache: deps.resolvedFooter.cache,
+        context: deps.resolvedFooter.context,
+        model: deps.resolvedFooter.model,
+        sessionStats: (deps.resolvedFooter as any).sessionStats,
+        dailyStats: (deps.resolvedFooter as any).dailyStats,
+        monthlyStats: (deps.resolvedFooter as any).monthlyStats,
+      },
+      deps.sessionKey,
+    );
   }
 
   // ------------------------------------------------------------------
@@ -419,6 +456,15 @@ export class StreamingCardController {
     this.flush.complete();
     this.disposeShutdownHook?.();
     this.disposeShutdownHook = null;
+
+    // Unregister pause button target
+    if (this.cardKit.cardMessageId) {
+      unregisterPauseTarget(this.cardKit.cardMessageId);
+    }
+
+    // Record session stats
+    this.streamingFooter.recordTurnCompletion(this.getLastMetrics());
+
     if (this.phase === 'terminated' || this.phase === 'creation_failed') {
       clearToolUseTraceRun(this.deps.sessionKey);
     }
@@ -464,6 +510,10 @@ export class StreamingCardController {
 
     if (split.reasoningText && !split.answerText) {
       // Pure reasoning payload
+      if (!this.reasoning.isReasoningPhase && this.text.accumulatedText) {
+        // Save text accumulated before reasoning started
+        this.textBeforeReasoning = this.text.accumulatedText;
+      }
       this.reasoning.reasoningElapsedMs = this.reasoning.reasoningStartTime
         ? Date.now() - this.reasoning.reasoningStartTime
         : 0;
@@ -474,10 +524,16 @@ export class StreamingCardController {
     }
 
     // Answer payload (may also contain inline reasoning from tags)
-    this.reasoning.isReasoningPhase = false;
-    if (split.reasoningText) {
-      this.reasoning.accumulatedReasoningText = split.reasoningText;
+    if (this.reasoning.isReasoningPhase && this.reasoning.accumulatedReasoningText) {
+      // Save completed reasoning round
+      const elapsed = this.reasoning.reasoningStartTime ? Date.now() - this.reasoning.reasoningStartTime : 0;
+      this.completedReasonings.push({ text: this.reasoning.accumulatedReasoningText, elapsedMs: elapsed });
+      this.completedOutputs.push(this.textBeforeReasoning || this.text.accumulatedText || '');
     }
+    this.textBeforeReasoning = '';
+    this.reasoning.isReasoningPhase = false;
+    this.reasoning.accumulatedReasoningText = '';
+    this.reasoning.reasoningStartTime = null;
     const answerText = split.answerText ?? text;
 
     // 累积 deliver 文本用于最终卡片
@@ -556,6 +612,10 @@ export class StreamingCardController {
       if (!this.reasoning.reasoningStartTime) {
         this.reasoning.reasoningStartTime = Date.now();
       }
+      // Save text before reasoning started
+      if (!this.reasoning.isReasoningPhase && this.text.accumulatedText) {
+        this.textBeforeReasoning = this.text.accumulatedText;
+      }
       this.reasoning.accumulatedReasoningText = split.reasoningText;
       this.reasoning.isReasoningPhase = true;
     }
@@ -572,6 +632,17 @@ export class StreamingCardController {
       this.reasoning.reasoningElapsedMs = this.reasoning.reasoningStartTime
         ? Date.now() - this.reasoning.reasoningStartTime
         : 0;
+      // Save completed reasoning round
+      if (this.reasoning.accumulatedReasoningText) {
+        this.completedReasonings.push({
+          text: this.reasoning.accumulatedReasoningText,
+          elapsedMs: this.reasoning.reasoningElapsedMs,
+        });
+        this.completedOutputs.push(this.textBeforeReasoning || '');
+      }
+      this.textBeforeReasoning = '';
+      this.reasoning.accumulatedReasoningText = '';
+      this.reasoning.reasoningStartTime = null;
     }
 
     // 检测回复边界：文本长度缩短 → 新回复开始
@@ -909,6 +980,17 @@ export class StreamingCardController {
               return;
             }
             log.info('sent CardKit card', { messageId: result.messageId });
+
+            // Register pause target for stop button
+            if (this.deps.abortController) {
+              registerPauseTarget(result.messageId, {
+                abortController: this.deps.abortController,
+                cardMessageId: result.messageId,
+              });
+            }
+
+            // Initialize streaming footer
+            this.streamingFooter.init();
           } else {
             throw new Error('card.create returned empty card_id');
           }
@@ -1009,12 +1091,19 @@ export class StreamingCardController {
       } else {
         log.debug('flushCardUpdate: IM patch fallback');
         const flushDisplay = this.computeToolUseDisplay();
+        // Build footer content
+        const footerContent = this.streamingFooter.shouldUpdate()
+          ? this.streamingFooter.buildContent(await this.getFooterSessionMetrics())
+          : undefined;
         const card = buildCardContent('streaming', {
           text: this.reasoning.isReasoningPhase ? '' : resolvedText,
           reasoningText: this.reasoning.isReasoningPhase ? this.reasoning.accumulatedReasoningText : undefined,
           toolUseSteps: flushDisplay?.steps,
           toolUseTitleSuffix: this.computeToolUseTitleSuffix(flushDisplay),
           showToolUse: this.deps.toolUseDisplay.showToolUse,
+          completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
+          completedOutputs: this.completedOutputs.length > 0 ? this.completedOutputs : undefined,
+          footerContent,
         });
         await updateCardFeishu({
           cfg: this.deps.cfg,
