@@ -565,7 +565,7 @@ function buildStructuredFooter(content: string): CardElement[] {
   };
 
   for (const line of lines) {
-    if (line === '───────────────────') {
+    if (line === '──────────────────────') {
       flushPending();
       elements.push({ tag: 'hr' });
     } else {

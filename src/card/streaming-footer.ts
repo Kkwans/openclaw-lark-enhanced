@@ -131,7 +131,7 @@ export class StreamingFooter {
       if (config.monthlyStats) {
         lines.push(`📆 本月 ${monthly.turns} 轮 · 🪙 ${formatTokenCount(totalTokens(monthly))} · ⚡ ${cacheRate(monthly)}`);
       }
-      lines.push('───────────────────');
+      lines.push('──────────────────────');
     }
 
     // Detail line: tokens + cache + context
