@@ -24,8 +24,59 @@ This plugin provides comprehensive Lark/Feishu integration for OpenClaw, includi
 Additionally, the plugin supports:
 - **📱 Interactive Cards**: Real-time status updates (Thinking/Generating/Complete), plus confirmation buttons for sensitive operations
 - **🌊 Streaming Responses**: Live streaming text directly within message cards
+- **🎛️ Enhanced Streaming Footer** (enhanced版独有): Multi-round thinking/output display, stop button, session/daily/monthly stats — see [Footer Spec](./FOOTER.md)
 - **🔒 Permission Policies**: Flexible access control policies for DMs and group chats
 - **⚙️ Advanced Group Configuration**: Per-group settings including allowlists, skill bindings, and custom system prompts
+
+### 🎛️ Enhanced Streaming Footer
+
+本 fork 的增强版 footer 在流式输出卡片底部提供完整的状态信息：
+
+**流式输出中**（有停止按钮，无日月统计）：
+```
+┌─────────────────────────────────────┐
+│ ⏳ 回复中                           │
+├─────────────────────────────────────┤
+│ 💭 思考了 2m 18s （第一次思考）      │
+│ bbaacc（第一次输出）                 │
+│                                     │
+│ 💭 思考了 1m 32s （第二次思考）      │
+│ aabbcc（第二次输出）                 │
+│                                     │
+│ ...（生成输出中的动画）  ⏹️ 停止     │
+│ ──────────────────────              │
+│ 🪙 6666+1234 · ⚡ 98% · 🧠 82k/1.0m (8%) │
+│ ⏳ 生成中 · ⏱️ 47.2s · 🤖 mimo-v2.5-pro │
+└─────────────────────────────────────┘
+```
+
+**输出完成终态**（含会话/今日/本月统计）：
+```
+┌─────────────────────────────────────┐
+│ ✅ 已完成                           │
+├─────────────────────────────────────┤
+│ 💭 思考了 2m 18s （第一次思考）      │
+│ bbaacc（第一次输出）                 │
+│                                     │
+│ 💭 思考了 1m 32s （第二次思考）      │
+│ aabbcc（第二次输出）                 │
+│ abcabc（第三次输出）                 │
+│                                     │
+│ 💭 思考了 47s （第三次思考）         │
+│ abcd（第四次输出）                   │
+│                                     │
+│ abcddcba（最后一次输出）             │
+│ ──────────────────────              │
+│ 💬 会话 2 轮 · 🪙 1.23w · ⚡ 96%   │
+│ 📅 今日 5 轮 · 🪙 5.41w · ⚡ 92%   │
+│ 📆 本月 50 轮 · 🪙 28.8w · ⚡ 86%  │
+│ ──────────────────────              │
+│ 🪙 1.12w+2345 · ⚡ 94% · 🧠 131k/1.0m (13%) │
+│ ✅ 已完成 · ⏱️ 2m18s · 🤖 mimo-v2.5-pro │
+└─────────────────────────────────────┘
+```
+
+详细规范见 [FOOTER.md](./FOOTER.md)。
 
 ## Security & Risk Warnings (Read Before Use)
 
