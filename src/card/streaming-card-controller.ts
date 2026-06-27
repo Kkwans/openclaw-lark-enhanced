@@ -157,10 +157,11 @@ export class StreamingCardController {
       const lastUsage = session?.lastUsage as Record<string, unknown> | undefined;
 
       if (lastUsage) {
-        const input = typeof lastUsage.inputTokens === 'number' ? lastUsage.inputTokens : undefined;
-        const output = typeof lastUsage.outputTokens === 'number' ? lastUsage.outputTokens : undefined;
-        const cacheRead = typeof lastUsage.cacheReadTokens === 'number' ? lastUsage.cacheReadTokens : undefined;
-        const cacheWrite = typeof lastUsage.cacheCreationTokens === 'number' ? lastUsage.cacheCreationTokens : undefined;
+        // OpenClaw runtime lastUsage fields: input, output, cacheRead, cacheWrite, total
+        const input = typeof lastUsage.input === 'number' ? lastUsage.input : undefined;
+        const output = typeof lastUsage.output === 'number' ? lastUsage.output : undefined;
+        const cacheRead = typeof lastUsage.cacheRead === 'number' ? lastUsage.cacheRead : undefined;
+        const cacheWrite = typeof lastUsage.cacheWrite === 'number' ? lastUsage.cacheWrite : undefined;
         log.info('recordSessionStats: lastUsage found', { input, output, cacheRead, cacheWrite });
         incrementSessionStats(this.deps.sessionKey, { input, output, cacheRead, cacheWrite });
       } else {
@@ -195,6 +196,22 @@ export class StreamingCardController {
     return outputs;
   }
 
+  /**
+   * Estimate token metrics during streaming.
+   * Since lastUsage is only updated after the turn completes, we estimate
+   * output tokens from the accumulated text length during streaming.
+   */
+  private getStreamingEstimateMetrics(): FooterSessionMetrics {
+    const totalChars = (this.text.completedText?.length || 0)
+      + (this.text.accumulatedText?.length || 0)
+      + (this.reasoning.accumulatedReasoningText?.length || 0);
+    // Rough estimate: ~1.5 chars per token for Chinese/mixed content
+    const estimatedOutputTokens = Math.round(totalChars / 1.5);
+    return {
+      outputTokens: estimatedOutputTokens > 0 ? estimatedOutputTokens : undefined,
+    };
+  }
+
   private async getFooterSessionMetrics(): Promise<FooterSessionMetrics | undefined> {
     try {
       const runtime = LarkClient.runtime as Record<string, unknown> | null;
@@ -206,11 +223,12 @@ export class StreamingCardController {
       const lastUsage = session?.lastUsage as Record<string, unknown> | undefined;
 
       if (lastUsage) {
-        const inputTokens = typeof lastUsage.inputTokens === 'number' ? lastUsage.inputTokens : undefined;
-        const outputTokens = typeof lastUsage.outputTokens === 'number' ? lastUsage.outputTokens : undefined;
-        const cacheRead = typeof lastUsage.cacheReadTokens === 'number' ? lastUsage.cacheReadTokens : undefined;
-        const cacheWrite = typeof lastUsage.cacheCreationTokens === 'number' ? lastUsage.cacheCreationTokens : undefined;
-        const totalTokens = typeof lastUsage.totalTokens === 'number' ? lastUsage.totalTokens : undefined;
+        // OpenClaw runtime lastUsage fields: input, output, cacheRead, cacheWrite, total
+        const inputTokens = typeof lastUsage.input === 'number' ? lastUsage.input : undefined;
+        const outputTokens = typeof lastUsage.output === 'number' ? lastUsage.output : undefined;
+        const cacheRead = typeof lastUsage.cacheRead === 'number' ? lastUsage.cacheRead : undefined;
+        const cacheWrite = typeof lastUsage.cacheWrite === 'number' ? lastUsage.cacheWrite : undefined;
+        const totalTokens = typeof lastUsage.total === 'number' ? lastUsage.total : undefined;
         const contextTokens = typeof lastUsage.contextTokens === 'number' ? lastUsage.contextTokens : undefined;
         const model = typeof lastUsage.model === 'string' ? lastUsage.model : undefined;
 
@@ -608,6 +626,14 @@ export class StreamingCardController {
         });
         // Save the accumulated text at this reasoning boundary
         this.outputAtReasoningBoundary.push(this.textBeforeReasoning || '');
+      }
+      // Restore text that was accumulated before reasoning started.
+      // Without this, the first output chunk (delivered before thinking)
+      // would be lost because onDeliver set streamingPrefix but
+      // onReasoningStream saved it to textBeforeReasoning and cleared
+      // accumulatedText. We need to restore it so the full output is shown.
+      if (this.textBeforeReasoning && !this.text.streamingPrefix) {
+        this.text.streamingPrefix = this.textBeforeReasoning;
       }
       this.textBeforeReasoning = '';
       this.reasoning.accumulatedReasoningText = '';
@@ -1062,12 +1088,12 @@ export class StreamingCardController {
         // CardKit path: update full card via card.update API
         // (supports all enhanced features: footer, thinking panels, stop button)
         const flushDisplay = this.computeToolUseDisplay();
-        // During streaming, do NOT pass token metrics — lastUsage is stale
-        // (still holds the previous turn's data). Token counts are only
-        // reliable in terminal states (onIdle/onComplete/onAbort) where
-        // lastUsage has been updated by the runtime.
+        // During streaming, estimate output tokens from text length.
+        // lastUsage is stale (previous turn), so we estimate instead.
+        // At terminal states (onIdle/onComplete/onAbort), real data is used.
+        const streamingMetrics = this.getStreamingEstimateMetrics();
         const footerContent = this.streamingFooter.shouldUpdate()
-          ? this.streamingFooter.buildContent(undefined)
+          ? this.streamingFooter.buildContent(streamingMetrics)
           : undefined;
         const card = buildCardContent('streaming', {
           text: this.reasoning.isReasoningPhase ? '' : resolvedText,
@@ -1096,9 +1122,10 @@ export class StreamingCardController {
       } else {
         log.debug('flushCardUpdate: IM patch fallback');
         const flushDisplay = this.computeToolUseDisplay();
-        // During streaming, do NOT pass token metrics — lastUsage is stale.
+        // During streaming, estimate output tokens from text length.
+        const streamingMetrics = this.getStreamingEstimateMetrics();
         const footerContent = this.streamingFooter.shouldUpdate()
-          ? this.streamingFooter.buildContent(undefined)
+          ? this.streamingFooter.buildContent(streamingMetrics)
           : undefined;
         const card = buildCardContent('streaming', {
           text: this.reasoning.isReasoningPhase ? '' : resolvedText,
