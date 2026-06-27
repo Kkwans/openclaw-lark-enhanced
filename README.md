@@ -1,52 +1,31 @@
-# OpenClaw Lark/Feishu Plugin
+# OpenClaw Lark Enhanced
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![npm version](https://img.shields.io/npm/v/@larksuite/openclaw-lark.svg)](https://www.npmjs.com/package/@larksuite/openclaw-lark)
-[![Node.js Version](https://img.shields.io/badge/node-%3E%3D22-blue.svg)](https://nodejs.org/)
+基于 [larksuite/openclaw-lark](https://github.com/larksuite/openclaw-lark) 官方飞书插件的增强版本。
 
-[中文版](./README.zh.md) | English
+## 增强功能
 
-This is the official Lark/Feishu plugin for OpenClaw, developed and maintained by the Lark/Feishu Open Platform team. It seamlessly connects your OpenClaw Agent to your Lark/Feishu workspace, enabling it to directly read from and write to messages, docs, bases, calendars, tasks, and more.
+### 1. 流式卡片 — 多轮思考+输出展示
 
-## Features
+支持 AI 多轮思考和输出的完整展示，不会丢失中间内容。思考组件按真实顺序与输出交叉出现：
 
-This plugin provides comprehensive Lark/Feishu integration for OpenClaw, including:
-
-| Category | Capabilities |
-|------|------|
-| 💬 Messenger | Read messages (group/DM history, thread replies), send messages, reply to messages, search messages, download images/files |
-| 📄 Docs | Create, update, and read documents |
-| 📊 Base | Create/manage bases, tables, fields, records (CRUD, batch operations, advanced filtering), views |
-| 📈 Sheets | Create, edit, and view spreadsheets |
-| 📅 Calendar | Manage calendars and events (create/query/update/delete/search), manage attendees, check free/busy status |
-| ✅ Tasks | Manage tasks (create/query/update/complete), manage task lists, subtasks, and comments |
-
-Additionally, the plugin supports:
-- **📱 Interactive Cards**: Real-time status updates (Thinking/Generating/Complete), plus confirmation buttons for sensitive operations
-- **🌊 Streaming Responses**: Live streaming text directly within message cards
-- **🎛️ Enhanced Streaming Footer** (enhanced版独有): Multi-round thinking/output display, stop button, session/daily/monthly stats — see [Footer Spec](./FOOTER.md)
-- **🔒 Permission Policies**: Flexible access control policies for DMs and group chats
-- **⚙️ Advanced Group Configuration**: Per-group settings including allowlists, skill bindings, and custom system prompts
-
-### 🎛️ Enhanced Streaming Footer
-
-本 fork 的增强版 footer 在流式输出卡片底部提供完整的状态信息：
-
-**流式输出中**（有停止按钮，无日月统计）：
+**流式输出过程中**（有停止按钮，无日月统计）：
 ```
 ┌─────────────────────────────────────────────┐
 │ ⏳ 回复中                                   │
 ├─────────────────────────────────────────────┤
+│ [工具调用面板]                               │
+│                                             │
 │ 💭 思考了 2m 18s （第一次思考）              │
 │ bbaacc（第一次输出）                         │
 │                                             │
 │ 💭 思考了 1m 32s （第二次思考）              │
 │ aabbcc（第二次输出）                         │
-│   abcabc（第三次输出）                       │
+│ abcabc（第三次输出）                         │
 │                                             │
-│ ...（输出生成中动画）                         │
+│ ...（生成中...）                             │
+│ ─────────────────────────────────────────── │
 │ ⏹️ 停止                                     │
-├─────────────────────────────────────────────┤
+│ ─────────────────────────────────────────── │
 │ 🪙 6666+1234 · ⚡ 98% · 🧠 82k/1.0m (8%)   │
 │ ⏳ 生成中 · ⏱️ 5m 12s · 🤖 mimo-v2.5-pro   │
 └─────────────────────────────────────────────┘
@@ -57,73 +36,128 @@ Additionally, the plugin supports:
 ┌─────────────────────────────────────────────┐
 │ ✅ 已完成                                   │
 ├─────────────────────────────────────────────┤
+│ [工具调用面板]                               │
+│                                             │
 │ 💭 思考了 2m 18s （第一次思考）              │
 │ bbaacc（第一次输出）                         │
 │                                             │
 │ 💭 思考了 1m 32s （第二次思考）              │
 │ aabbcc（第二次输出）                         │
-│   abcabc（第三次输出）                       │
+│ abcabc（第三次输出）                         │
 │                                             │
 │ 💭 思考了 47s （第三次思考）                 │
 │ abcd（第四次输出）                           │
 │                                             │
-│   abcddcba（最后一次输出）                   │
-├─────────────────────────────────────────────┤
+│ abcddcba（最后一次输出）                     │
+│ ─────────────────────────────────────────── │
 │ 💬 会话 2 轮 · 🪙 1.23w · ⚡ 96%           │
 │ 📅 今日 5 轮 · 🪙 5.41w · ⚡ 92%           │
 │ 📆 本月 50 轮 · 🪙 28.8w · ⚡ 86%          │
-├─────────────────────────────────────────────┤
+│ ─────────────────────────────────────────── │
 │ 🪙 1.12w+2345 · ⚡ 94% · 🧠 131k/1.0m (13%)│
 │ ✅ 已完成 · ⏱️ 8m18s · 🤖 mimo-v2.5-pro    │
 └─────────────────────────────────────────────┘
 ```
 
-详细规范见 [FOOTER.md](./FOOTER.md)。
+### 2. 暂停按钮
 
-## Security & Risk Warnings (Read Before Use)
+流式输出过程中显示「⏹️ 停止」按钮，点击可立即停止 LLM 生成：
+- 通过 AbortController 中断 LLM 请求
+- 卡片更新为「⏹️ 已停止」状态（橙色标题）
+- 终态卡片自动移除停止按钮
 
-This plugin integrates with OpenClaw AI automation capabilities and carries inherent risks such as model hallucinations, unpredictable execution, and prompt injection. After you authorize Lark/Feishu permissions, OpenClaw will act under your user identity within the authorized scope, which may lead to high-risk consequences such as leakage of sensitive data or unauthorized operations. Please use with caution.
+### 3. 卡片状态视觉区分
 
-To reduce these risks, the plugin enables default security protections at multiple layers. However, these risks still exist. We strongly recommend that you do not proactively modify any default security settings; once relevant restrictions are relaxed, the risks will increase significantly, and you will bear the consequences.
+| 状态 | Header 颜色 | 标题 |
+|------|------------|------|
+| 流式中 | 🩵 青色 | ⏳ 回复中 |
+| 完成 | 🟢 绿色 | ✅ 已完成 |
+| 出错 | 🔴 红色 | ❌ 出错 |
+| 停止 | 🟠 橙色 | ⏸️ 已停止 |
 
-We recommend using the Lark/Feishu bot connected to OpenClaw as a private conversational assistant. Do not add it to group chats or allow other users to interact with it, to avoid abuse of permissions or data leakage.
+### 4. Footer 实时信息
 
-Please fully understand all usage risks. By using this plugin, you are deemed to voluntarily assume all related responsibilities.
+流式输出过程中，卡片底部实时显示：
+- 🪙 Token 消耗（输入+输出）
+- ⚡ 缓存命中率
+- 🧠 上下文窗口占用（已用/总量 + 百分比）
+- ⏳ 生成状态 + ⏱️ 耗时 + 🤖 模型名称
 
+输出完成后，额外显示会话/今日/本月统计：
+- 💬 会话累计轮数 + 🪙 Token 消耗 + ⚡ 缓存命中率
+- 📅 今日统计（轮数 + Token + 缓存命中率）
+- 📆 本月统计（轮数 + Token + 缓存命中率）
 
-**Disclaimer:**
+### 5. 提问过期时间调整
 
-This software is licensed under the MIT License. When running, it calls Lark/Feishu Open Platform APIs. To use these APIs, you must comply with the following agreements and privacy policies:
+交互式提问卡片过期时间从 5 分钟调整为 10 分钟，给用户更充裕的回复时间。
 
-- [Feishu Privacy Policy](https://www.feishu.cn/en/privacy?from=openclaw_plugin_readme)
-- [Feishu User Terms of Service](https://www.feishu.cn/en/terms?from=openclaw_plugin_readme)
-- [Feishu Store App Service Provider Security Management Specifications](https://open.larkoffice.com/document/uAjLw4CM/uMzNwEjLzcDMx4yM3ATM/management-practice/app-service-provider-security-management-specifications)
+### 6. Emoji 语义化
 
-- [Lark Privacy Policy](https://www.larksuite.com/user-terms-of-service)
-- [Lark User Terms of Service](https://www.larksuite.com/privacy-policy)
+| Emoji | 含义 |
+|-------|------|
+| 🪙 | Token 消耗（硬币 = 成本/消耗） |
+| ⚡ | 缓存命中（闪电 = 速度/命中） |
+| 🧠 | 上下文占用（大脑 = 记忆容量） |
+| 💬 | 会话统计 |
+| 📅 | 今日统计 |
+| 📆 | 本月统计 |
+| 💭 | 思考/推理 |
 
-## Requirements & Installation
+## 与官方插件的区别
 
-Before you start, make sure you have the following:
+| 功能 | 官方插件 | 增强版 |
+|------|---------|--------|
+| 多轮思考+输出 | ❌ 只显示最后一段 | ✅ 完整展示所有轮次 |
+| 思考顺序 | ❌ 全部堆叠在顶部 | ✅ 按真实顺序与输出交叉 |
+| 流式 Footer | ❌ 无 | ✅ 实时显示 Token/缓存/上下文 |
+| 停止按钮 | ❌ 无 | ✅ 流式中可停止生成 |
+| 卡片状态区分 | ❌ 无 header | ✅ 青/绿/红/橙 header |
+| 会话统计 | ❌ 无 | ✅ 累计 Token + 缓存命中 |
+| 日/月统计 | ❌ 无 | ✅ 按日期/月份聚合 |
+| 提问过期 | 5 分钟 | 10 分钟 |
 
-- **Node.js**: `v22` or higher.
-- **OpenClaw**: OpenClaw is installed and works properly. For details, visit the [OpenClaw official website](https://openclaw.ai).
+## 安装
 
-> **Note**: OpenClaw version must be **2026.2.26** or higher. Check with `openclaw -v`. If below this version, you may encounter issues. Upgrade with:
-> ```bash
-> npm install -g openclaw
-> ```
+```bash
+git clone https://github.com/Kkwans/openclaw-lark-enhanced.git
+cd openclaw-lark-enhanced
+pnpm install
+pnpm build
+cp -r dist package.json <openclaw-extensions-dir>/openclaw-lark-enhanced/
+cd <openclaw-extensions-dir>/openclaw-lark-enhanced/
+pnpm install --prod
+```
 
-## Usage Guide
+## 配置
 
-[How to Use the Official Lark/Feishu Plugin for OpenClaw](https://bytedance.larkoffice.com/docx/MFK7dDFLFoVlOGxWCv5cTXKmnMh)
+在 `openclaw.json` 中启用 footer 功能：
 
-## Contributing
+```json
+{
+  "channels": {
+    "feishu": {
+      "footer": {
+        "status": true,
+        "elapsed": true,
+        "tokens": true,
+        "cache": true,
+        "context": true,
+        "model": true,
+        "sessionStats": true,
+        "dailyStats": true,
+        "monthlyStats": true
+      }
+    }
+  }
+}
+```
 
-Community contributions are welcome! If you find a bug or have feature suggestions, please submit an [Issue](https://github.com/larksuite/openclaw-larksuite/issues) or a [Pull Request](https://github.com/larksuite/openclaw-larksuite/pulls).
+## 许可证
 
-For major changes, we recommend discussing with us first via an Issue.
+MIT License（继承自官方插件）。
 
-## License
+## 致谢
 
-This project is licensed under the **MIT License**. See [LICENSE](./LICENSE.md) for details.
+- [larksuite/openclaw-lark](https://github.com/larksuite/openclaw-lark) — 官方飞书插件
+- [OpenClaw](https://github.com/openclaw/openclaw) — AI 助理框架

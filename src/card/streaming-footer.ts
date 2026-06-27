@@ -136,25 +136,49 @@ export class StreamingFooter {
 
     // Detail line: tokens + cache + context
     const detailParts: string[] = [];
-    if (config.tokens && metrics) {
-      const input = metrics.inputTokens ?? 0;
-      const output = metrics.outputTokens ?? 0;
-      detailParts.push(`🪙 ${formatTokenCount(input)}+${formatTokenCount(output)}`);
-    }
-    if (config.cache && metrics) {
-      const read = metrics.cacheRead ?? 0;
-      const write = metrics.cacheWrite ?? 0;
-      const input = metrics.inputTokens ?? 0;
-      detailParts.push(`⚡ ${formatCacheRate(read, write, input)}`);
-    }
-    if (config.context && metrics) {
-      const used = metrics.totalTokens ?? 0;
-      const maxCtx = metrics.contextTokens ?? 0;
-      if (maxCtx > 0) {
-        const pct = Math.round((used / maxCtx) * 100);
-        detailParts.push(`🧠 ${compactNumber(used)}/${compactNumber(maxCtx)} (${pct}%)`);
+    if (config.tokens) {
+      if (metrics) {
+        const input = metrics.inputTokens ?? 0;
+        const output = metrics.outputTokens ?? 0;
+        if (input > 0 || output > 0) {
+          detailParts.push(`🪙 ${formatTokenCount(input)}+${formatTokenCount(output)}`);
+        } else {
+          detailParts.push('🪙 -');
+        }
       } else {
-        detailParts.push(`🧠 ${compactNumber(used)}`);
+        detailParts.push('🪙 -');
+      }
+    }
+    if (config.cache) {
+      if (metrics) {
+        const read = metrics.cacheRead ?? 0;
+        const write = metrics.cacheWrite ?? 0;
+        const input = metrics.inputTokens ?? 0;
+        if (read > 0 || write > 0 || input > 0) {
+          detailParts.push(`⚡ ${formatCacheRate(read, write, input)}`);
+        } else {
+          detailParts.push('⚡ -');
+        }
+      } else {
+        detailParts.push('⚡ -');
+      }
+    }
+    if (config.context) {
+      if (metrics) {
+        const used = metrics.totalTokens ?? 0;
+        const maxCtx = metrics.contextTokens ?? 0;
+        if (used > 0) {
+          if (maxCtx > 0) {
+            const pct = Math.round((used / maxCtx) * 100);
+            detailParts.push(`🧠 ${compactNumber(used)}/${compactNumber(maxCtx)} (${pct}%)`);
+          } else {
+            detailParts.push(`🧠 ${compactNumber(used)}`);
+          }
+        } else {
+          detailParts.push('🧠 -');
+        }
+      } else {
+        detailParts.push('🧠 -');
       }
     }
     if (detailParts.length > 0) {

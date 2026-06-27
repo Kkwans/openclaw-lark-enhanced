@@ -598,6 +598,10 @@ export class StreamingCardController {
     const rawText = payload.text ?? '';
     if (!rawText) return;
 
+    // Capture text before reasoning starts (for output delta calculation)
+    if (!this.reasoning.isReasoningPhase && this.text.accumulatedText) {
+      this.textBeforeReasoning = this.text.accumulatedText;
+    }
     if (!this.reasoning.reasoningStartTime) {
       this.reasoning.reasoningStartTime = Date.now();
     }
@@ -733,6 +737,7 @@ export class StreamingCardController {
           completedOutputs: this.getCompletedOutputTexts().length > 0 ? this.getCompletedOutputTexts() : undefined,
           footer: this.deps.resolvedFooter,
           footerMetrics,
+          footerContent: this.streamingFooter.buildContent(footerMetrics, true),
         });
         if (errorEffectiveCardId) {
           await this.closeStreamingAndUpdate(errorEffectiveCardId, errorCard, 'onError');
@@ -822,6 +827,7 @@ export class StreamingCardController {
           completedOutputs: this.getCompletedOutputTexts().length > 0 ? this.getCompletedOutputTexts() : undefined,
           footer: this.deps.resolvedFooter,
           footerMetrics,
+          footerContent: this.streamingFooter.buildContent(footerMetrics, true),
         });
 
         if (idleEffectiveCardId) {
@@ -907,6 +913,7 @@ export class StreamingCardController {
           completedOutputs: this.getCompletedOutputTexts().length > 0 ? this.getCompletedOutputTexts() : undefined,
           footer: this.deps.resolvedFooter,
           footerMetrics,
+          footerContent: this.streamingFooter.buildContent(footerMetrics, true),
         });
         await this.closeStreamingAndUpdate(effectiveCardId, abortCardContent, 'abortCard');
         log.info('abortCard completed', { effectiveCardId });
@@ -926,6 +933,7 @@ export class StreamingCardController {
           completedOutputs: this.getCompletedOutputTexts().length > 0 ? this.getCompletedOutputTexts() : undefined,
           footer: this.deps.resolvedFooter,
           footerMetrics,
+          footerContent: this.streamingFooter.buildContent(footerMetrics, true),
         });
         await updateCardFeishu({
           cfg: this.deps.cfg,

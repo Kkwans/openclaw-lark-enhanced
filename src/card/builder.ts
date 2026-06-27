@@ -338,6 +338,8 @@ export function buildCardContent(
       model?: boolean;
     };
     footerMetrics?: FooterSessionMetrics;
+    /** Pre-built footer content string (from StreamingFooter.buildContent). */
+    footerContent?: string;
   } = {},
 ): FeishuCard {
   switch (state) {
@@ -369,6 +371,7 @@ export function buildCardContent(
         completedOutputs: data.completedOutputs,
         footer: data.footer,
         footerMetrics: data.footerMetrics,
+        footerContent: data.footerContent,
       });
     case 'confirm':
       return buildConfirmCard(data.confirmData!);
@@ -492,6 +495,7 @@ function buildStreamingCard(
 
   // Structured footer (uses hr + separate elements for proper rendering)
   if (params.footerContent) {
+    elements.push({ tag: 'hr' });
     const footerSections = buildStructuredFooter(params.footerContent);
     elements.push(...footerSections);
   }
@@ -598,6 +602,8 @@ function buildCompleteCard(params: {
     model?: boolean;
   };
   footerMetrics?: FooterSessionMetrics;
+  /** Pre-built footer content string (from StreamingFooter.buildContent). */
+  footerContent?: string;
 }): FeishuCard {
   const {
     text,
@@ -614,6 +620,7 @@ function buildCompleteCard(params: {
     completedOutputs,
     footer,
     footerMetrics,
+    footerContent,
   } = params;
   const elements: CardElement[] = [];
 
@@ -662,29 +669,34 @@ function buildCompleteCard(params: {
     }
   }
 
-  // Footer meta-info: split into two lines for readability.
-  // Line 1 (primary): status · elapsed · model
-  // Line 2 (detail):  tokens · cache · context
-  const fp = formatFooterRuntimeSegments({
-    footer,
-    metrics: footerMetrics,
-    elapsedMs,
-    isError,
-    isAborted,
-  });
+  // Footer meta-info: prefer pre-built footerContent (from StreamingFooter)
+  // which includes session/daily/monthly stats. Fall back to old format.
+  if (footerContent) {
+    elements.push({ tag: 'hr' });
+    const footerSections = buildStructuredFooter(footerContent);
+    elements.push(...footerSections);
+  } else {
+    const fp = formatFooterRuntimeSegments({
+      footer,
+      metrics: footerMetrics,
+      elapsedMs,
+      isError,
+      isAborted,
+    });
 
-  const footerZhLines: string[] = [];
-  const footerEnLines: string[] = [];
-  if (fp.primaryZh.length > 0) {
-    footerZhLines.push(fp.primaryZh.join(' · '));
-    footerEnLines.push(fp.primaryEn.join(' · '));
-  }
-  if (fp.detailZh.length > 0) {
-    footerZhLines.push(fp.detailZh.join(' · '));
-    footerEnLines.push(fp.detailEn.join(' · '));
-  }
-  if (footerZhLines.length > 0) {
-    elements.push(...buildFooter(footerZhLines.join('\n'), footerEnLines.join('\n'), isError));
+    const footerZhLines: string[] = [];
+    const footerEnLines: string[] = [];
+    if (fp.primaryZh.length > 0) {
+      footerZhLines.push(fp.primaryZh.join(' · '));
+      footerEnLines.push(fp.primaryEn.join(' · '));
+    }
+    if (fp.detailZh.length > 0) {
+      footerZhLines.push(fp.detailZh.join(' · '));
+      footerEnLines.push(fp.detailEn.join(' · '));
+    }
+    if (footerZhLines.length > 0) {
+      elements.push(...buildFooter(footerZhLines.join('\n'), footerEnLines.join('\n'), isError));
+    }
   }
 
   // Use the answer text as the feed preview summary.
