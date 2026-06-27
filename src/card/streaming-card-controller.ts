@@ -11,7 +11,6 @@
  * detection to UnavailableGuard.
  */
 
-import { readFile } from 'node:fs/promises';
 import { resolveDefaultAgentId } from 'openclaw/plugin-sdk/agent-runtime';
 import type { ReplyPayload } from 'openclaw/plugin-sdk';
 import { SILENT_REPLY_TOKEN } from 'openclaw/plugin-sdk/reply-runtime';
@@ -150,25 +149,26 @@ export class StreamingCardController {
   /** Record session statistics for this turn. */
   private recordSessionStats(): void {
     try {
-      // Try to get metrics from the runtime
       const runtime = LarkClient.runtime as Record<string, unknown> | null;
-      const agent = runtime?.agent as Record<string, unknown> | undefined;
+      if (!runtime) { incrementSessionStats(this.deps.sessionKey, {}); return; }
+
+      const agent = runtime.agent as Record<string, unknown> | undefined;
       const session = agent?.session as Record<string, unknown> | undefined;
       const lastUsage = session?.lastUsage as Record<string, unknown> | undefined;
 
       if (lastUsage) {
-        incrementSessionStats(this.deps.sessionKey, {
-          input: lastUsage.inputTokens as number | undefined,
-          output: lastUsage.outputTokens as number | undefined,
-          cacheRead: lastUsage.cacheReadTokens as number | undefined,
-          cacheWrite: lastUsage.cacheCreationTokens as number | undefined,
-        });
+        const input = typeof lastUsage.inputTokens === 'number' ? lastUsage.inputTokens : undefined;
+        const output = typeof lastUsage.outputTokens === 'number' ? lastUsage.outputTokens : undefined;
+        const cacheRead = typeof lastUsage.cacheReadTokens === 'number' ? lastUsage.cacheReadTokens : undefined;
+        const cacheWrite = typeof lastUsage.cacheCreationTokens === 'number' ? lastUsage.cacheCreationTokens : undefined;
+        log.info('recordSessionStats: lastUsage found', { input, output, cacheRead, cacheWrite });
+        incrementSessionStats(this.deps.sessionKey, { input, output, cacheRead, cacheWrite });
       } else {
-        // No usage data available, just record the turn
+        log.warn('recordSessionStats: lastUsage not available');
         incrementSessionStats(this.deps.sessionKey, {});
       }
-    } catch {
-      // Best effort - don't fail terminal phase for stats
+    } catch (err) {
+      log.error('recordSessionStats failed', { error: String(err) });
       incrementSessionStats(this.deps.sessionKey, {});
     }
   }
@@ -197,135 +197,70 @@ export class StreamingCardController {
 
   private async getFooterSessionMetrics(): Promise<FooterSessionMetrics | undefined> {
     try {
-      const runtime = LarkClient.runtime as {
-        agent?: {
-          session?: {
-            resolveStorePath?: (storePath?: string, opts?: { agentId?: string }) => string;
-            loadSessionStore?: (storePath: string) => Record<string, Record<string, unknown>>;
-          };
-        };
-        channel?: {
-          session?: {
-            resolveStorePath?: (storePath?: string, opts?: { agentId?: string }) => string;
-          };
-        };
-      } | null;
+      const runtime = LarkClient.runtime as Record<string, unknown> | null;
       if (!runtime) return undefined;
 
+      // Priority 1: Read from lastUsage (current turn's real-time data)
+      const agent = runtime.agent as Record<string, unknown> | undefined;
+      const session = agent?.session as Record<string, unknown> | undefined;
+      const lastUsage = session?.lastUsage as Record<string, unknown> | undefined;
+
+      if (lastUsage) {
+        const inputTokens = typeof lastUsage.inputTokens === 'number' ? lastUsage.inputTokens : undefined;
+        const outputTokens = typeof lastUsage.outputTokens === 'number' ? lastUsage.outputTokens : undefined;
+        const cacheRead = typeof lastUsage.cacheReadTokens === 'number' ? lastUsage.cacheReadTokens : undefined;
+        const cacheWrite = typeof lastUsage.cacheCreationTokens === 'number' ? lastUsage.cacheCreationTokens : undefined;
+        const totalTokens = typeof lastUsage.totalTokens === 'number' ? lastUsage.totalTokens : undefined;
+        const contextTokens = typeof lastUsage.contextTokens === 'number' ? lastUsage.contextTokens : undefined;
+        const model = typeof lastUsage.model === 'string' ? lastUsage.model : undefined;
+
+        if (inputTokens != null || outputTokens != null) {
+          log.debug('footer metrics: using lastUsage (current turn)', { inputTokens, outputTokens, cacheRead, cacheWrite });
+          return { inputTokens, outputTokens, cacheRead, cacheWrite, totalTokens, contextTokens, model };
+        }
+      }
+
+      // Priority 2: Read from session store (cumulative data)
       const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
       const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
       const key = this.deps.sessionKey.trim().toLowerCase();
-
-      // WORKAROUND: SDK session key round-trip bug.
-      // The SDK's toAgentRequestSessionKey() strips the agent scope from keys
-      // like "agent:hr:main" → "main", then toAgentStoreSessionKey() rebuilds
-      // using the default agent ID → "agent:main:main".  This means metrics
-      // written by the SDK always land under "agent:<defaultAgentId>:…"
-      // regardless of the account-scoped agent ID the plugin routing generated.
-      // Fallback: when the primary key misses, try replacing the agent-id
-      // segment with the resolved default agent ID.
-      // TODO: remove once the SDK preserves the original agent ID during the
-      // request→store key round-trip.
       const defaultAgentId = resolveDefaultAgentId(this.deps.cfg as Record<string, unknown>);
       const fallbackKey = key.replace(/^(agent):[^:]+:/, `$1:${defaultAgentId}:`);
       const candidateKeys = fallbackKey !== key ? [key, fallbackKey] : [key];
 
-      const sessionApi = runtime.agent?.session;
-      if (sessionApi?.resolveStorePath && sessionApi?.loadSessionStore) {
-        const storePath = sessionApi.resolveStorePath(sessionStorePath, { agentId: this.deps.agentId });
-        const store = sessionApi.loadSessionStore(storePath);
+      const runtimeAny = runtime as Record<string, unknown>;
+      const agentAny = runtimeAny.agent as Record<string, unknown> | undefined;
+      const sessionApi = agentAny?.session as Record<string, unknown> | undefined;
+      const resolveStorePath = sessionApi?.resolveStorePath as ((storePath?: string, opts?: { agentId?: string }) => string) | undefined;
+      const loadSessionStore = sessionApi?.loadSessionStore as ((storePath: string) => Record<string, Record<string, unknown>>) | undefined;
+
+      if (resolveStorePath && loadSessionStore) {
+        const storePath = resolveStorePath(sessionStorePath, { agentId: this.deps.agentId });
+        const store = loadSessionStore(storePath);
 
         let entry: Record<string, unknown> | undefined;
-        let matchedKey: string | undefined;
         for (const candidate of candidateKeys) {
           const val = store[candidate];
           if (val && typeof val === 'object') {
             entry = val as Record<string, unknown>;
-            matchedKey = candidate;
             break;
           }
         }
 
-        if (!entry) {
-          log.debug('footer metrics lookup: session entry missing', {
-            sessionKey: this.deps.sessionKey,
-            candidateKeys,
-            storePath,
-            source: 'runtime.agent.session',
-          });
-          return undefined;
-        }
-
-        const metrics: FooterSessionMetrics = {
-          inputTokens: typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined,
-          outputTokens: typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined,
-          cacheRead: typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined,
-          cacheWrite: typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined,
-          totalTokens: typeof entry.totalTokens === 'number' ? entry.totalTokens : undefined,
-          totalTokensFresh: typeof entry.totalTokensFresh === 'boolean' ? entry.totalTokensFresh : undefined,
-          contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
-          model: typeof entry.model === 'string' ? entry.model : undefined,
-        };
-        log.debug('footer metrics lookup: session entry found', {
-          sessionKey: this.deps.sessionKey,
-          matchedKey,
-          storePath,
-          source: 'runtime.agent.session',
-        });
-        return metrics;
-      }
-
-      const channelSession = runtime.channel?.session;
-      if (!channelSession?.resolveStorePath) {
-        return undefined;
-      }
-
-      const storePath = channelSession.resolveStorePath(sessionStorePath, { agentId: this.deps.agentId });
-      const raw = await readFile(storePath, 'utf8');
-      const parsed: unknown = JSON.parse(raw);
-      const store =
-        parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-          ? (parsed as Record<string, Record<string, unknown>>)
-          : {};
-
-      let entry: Record<string, unknown> | undefined;
-      let matchedKey: string | undefined;
-      for (const candidate of candidateKeys) {
-        const val = store[candidate];
-        if (val && typeof val === 'object') {
-          entry = val as Record<string, unknown>;
-          matchedKey = candidate;
-          break;
+        if (entry) {
+          return {
+            inputTokens: typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined,
+            outputTokens: typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined,
+            cacheRead: typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined,
+            cacheWrite: typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined,
+            totalTokens: typeof entry.totalTokens === 'number' ? entry.totalTokens : undefined,
+            contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
+            model: typeof entry.model === 'string' ? entry.model : undefined,
+          };
         }
       }
 
-      if (!entry) {
-        log.debug('footer metrics lookup: session entry missing', {
-          sessionKey: this.deps.sessionKey,
-          candidateKeys,
-          storePath,
-          source: 'channel.session.file',
-        });
-        return undefined;
-      }
-
-      const metrics: FooterSessionMetrics = {
-        inputTokens: typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined,
-        outputTokens: typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined,
-        cacheRead: typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined,
-        cacheWrite: typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined,
-        totalTokens: typeof entry.totalTokens === 'number' ? entry.totalTokens : undefined,
-        totalTokensFresh: typeof entry.totalTokensFresh === 'boolean' ? entry.totalTokensFresh : undefined,
-        contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
-        model: typeof entry.model === 'string' ? entry.model : undefined,
-      };
-      log.debug('footer metrics lookup: session entry found', {
-        sessionKey: this.deps.sessionKey,
-        matchedKey,
-        storePath,
-        source: 'channel.session.file',
-      });
-      return metrics;
+      return undefined;
     } catch (err) {
       log.warn('footer metrics lookup failed', { error: String(err), sessionKey: this.deps.sessionKey });
       return undefined;
