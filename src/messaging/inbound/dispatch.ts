@@ -262,6 +262,10 @@ async function dispatchNormalMessage(
     clearToolUseTraceRun(effectiveSessionKey);
   }
 
+  // Create an AbortController so the abort fast-path can cancel the
+  // underlying LLM request (not just the streaming card UI).
+  const abortController = new AbortController();
+
   const { dispatcher, replyOptions, markDispatchIdle, markFullyComplete, abortCard } = createFeishuReplyDispatcher({
     cfg: dc.accountScopedCfg,
     agentId: dc.route.agentId,
@@ -274,11 +278,8 @@ async function dispatchNormalMessage(
     replyInThread: routing.replyInThread,
     threadId: routing.threadId,
     toolUseDisplay,
+    abortController,
   });
-
-  // Create an AbortController so the abort fast-path can cancel the
-  // underlying LLM request (not just the streaming card UI).
-  const abortController = new AbortController();
 
   // Register the active dispatcher so the monitor abort fast-path can
   // terminate the streaming card before this task completes.

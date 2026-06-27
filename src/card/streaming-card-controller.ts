@@ -434,8 +434,7 @@ export class StreamingCardController {
       unregisterPauseTarget(this.cardKit.cardMessageId);
     }
 
-    // Record session stats with available metrics
-    this.recordSessionStats();
+    // Note: recordSessionStats() is called in onIdle() after getFooterSessionMetrics()
 
     if (this.phase === 'terminated' || this.phase === 'creation_failed') {
       clearToolUseTraceRun(this.deps.sessionKey);
@@ -542,7 +541,10 @@ export class StreamingCardController {
     }
     this.reasoning.isReasoningPhase = true;
     const split = splitReasoningText(rawText);
-    this.reasoning.accumulatedReasoningText = split.reasoningText ?? rawText;
+    const newReasoningText = split.reasoningText ?? rawText;
+    // Append to accumulated reasoning text (not replace) — multiple
+    // reasoning chunks may arrive for a single thinking phase.
+    this.reasoning.accumulatedReasoningText += (this.reasoning.accumulatedReasoningText ? '\n' : '') + newReasoningText;
     await this.throttledCardUpdate();
   }
 
@@ -645,6 +647,8 @@ export class StreamingCardController {
 
     const errorEffectiveCardId = this.cardKit.cardKitCardId ?? this.cardKit.originalCardKitCardId;
     const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
+    // Record session stats AFTER getFooterSessionMetrics() to ensure lastUsage is available
+    this.recordSessionStats();
     const toolUseDisplay = this.computeToolUseDisplay();
     try {
       if (this.cardKit.cardMessageId) {
@@ -749,6 +753,9 @@ export class StreamingCardController {
         );
         const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
 
+        // Record session stats AFTER getFooterSessionMetrics() to ensure lastUsage is available
+        this.recordSessionStats();
+
         const completeCard = buildCardContent('complete', {
           text: terminalContent.text,
           reasoningText: terminalContent.reasoningText,
@@ -833,6 +840,8 @@ export class StreamingCardController {
         this.imageResolver,
       );
       const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
+      // Record session stats AFTER getFooterSessionMetrics() to ensure lastUsage is available
+      this.recordSessionStats();
       if (effectiveCardId) {
         const abortCardContent = buildCardContent('complete', {
           text: terminalContent.text,
@@ -1053,8 +1062,12 @@ export class StreamingCardController {
         // CardKit path: update full card via card.update API
         // (supports all enhanced features: footer, thinking panels, stop button)
         const flushDisplay = this.computeToolUseDisplay();
+        // During streaming, do NOT pass token metrics — lastUsage is stale
+        // (still holds the previous turn's data). Token counts are only
+        // reliable in terminal states (onIdle/onComplete/onAbort) where
+        // lastUsage has been updated by the runtime.
         const footerContent = this.streamingFooter.shouldUpdate()
-          ? this.streamingFooter.buildContent(await this.getFooterSessionMetrics())
+          ? this.streamingFooter.buildContent(undefined)
           : undefined;
         const card = buildCardContent('streaming', {
           text: this.reasoning.isReasoningPhase ? '' : resolvedText,
@@ -1083,9 +1096,9 @@ export class StreamingCardController {
       } else {
         log.debug('flushCardUpdate: IM patch fallback');
         const flushDisplay = this.computeToolUseDisplay();
-        // Build footer content
+        // During streaming, do NOT pass token metrics — lastUsage is stale.
         const footerContent = this.streamingFooter.shouldUpdate()
-          ? this.streamingFooter.buildContent(await this.getFooterSessionMetrics())
+          ? this.streamingFooter.buildContent(undefined)
           : undefined;
         const card = buildCardContent('streaming', {
           text: this.reasoning.isReasoningPhase ? '' : resolvedText,

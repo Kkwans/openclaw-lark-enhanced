@@ -135,6 +135,8 @@ export interface CreateFeishuReplyDispatcherParams {
   /** Thread root id when the reply lives inside a thread; used for sentinel keying. */
   threadId?: string;
   toolUseDisplay: ToolUseDisplayConfig;
+  /** AbortController for the stop button. */
+  abortController?: AbortController;
 }
 
 /**
