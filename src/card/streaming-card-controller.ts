@@ -146,6 +146,46 @@ export class StreamingCardController {
     return footer.tokens || footer.cache || footer.context || footer.model;
   }
 
+  /** Read token usage from session store as fallback. */
+  private readSessionStoreTokens(): { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | undefined {
+    try {
+      const runtime = LarkClient.runtime as Record<string, unknown> | null;
+      if (!runtime) return undefined;
+
+      const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
+      const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
+      const key = this.deps.sessionKey.trim().toLowerCase();
+      const defaultAgentId = resolveDefaultAgentId(this.deps.cfg as Record<string, unknown>);
+      const fallbackKey = key.replace(/^(agent):[^:]+:/, `$1:${defaultAgentId}:`);
+      const candidateKeys = fallbackKey !== key ? [key, fallbackKey] : [key];
+
+      const agentAny = (runtime as Record<string, unknown>).agent as Record<string, unknown> | undefined;
+      const sessionApi = agentAny?.session as Record<string, unknown> | undefined;
+      const resolveStorePath = sessionApi?.resolveStorePath as ((storePath?: string, opts?: { agentId?: string }) => string) | undefined;
+      const loadSessionStore = sessionApi?.loadSessionStore as ((storePath: string) => Record<string, Record<string, unknown>>) | undefined;
+
+      if (resolveStorePath && loadSessionStore) {
+        const storePath = resolveStorePath(sessionStorePath, { agentId: this.deps.agentId });
+        const store = loadSessionStore(storePath);
+
+        for (const candidate of candidateKeys) {
+          const val = store[candidate];
+          if (val && typeof val === 'object') {
+            const entry = val as Record<string, unknown>;
+            const input = typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined;
+            const output = typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined;
+            const cacheRead = typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined;
+            const cacheWrite = typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined;
+            if (input != null || output != null || cacheRead != null || cacheWrite != null) {
+              return { input, output, cacheRead, cacheWrite };
+            }
+          }
+        }
+      }
+    } catch { /* ignore */ }
+    return undefined;
+  }
+
   /** Record session statistics for this turn. */
   private recordSessionStats(): void {
     try {
@@ -162,12 +202,23 @@ export class StreamingCardController {
         const output = typeof lastUsage.output === 'number' ? lastUsage.output : undefined;
         const cacheRead = typeof lastUsage.cacheRead === 'number' ? lastUsage.cacheRead : undefined;
         const cacheWrite = typeof lastUsage.cacheWrite === 'number' ? lastUsage.cacheWrite : undefined;
-        log.info('recordSessionStats: lastUsage found', { input, output, cacheRead, cacheWrite });
-        incrementSessionStats(this.deps.sessionKey, { input, output, cacheRead, cacheWrite });
-      } else {
-        log.warn('recordSessionStats: lastUsage not available');
-        incrementSessionStats(this.deps.sessionKey, {});
+        if (input != null || output != null || cacheRead != null || cacheWrite != null) {
+          log.info('recordSessionStats: lastUsage found', { input, output, cacheRead, cacheWrite });
+          incrementSessionStats(this.deps.sessionKey, { input, output, cacheRead, cacheWrite });
+          return;
+        }
       }
+
+      // Fallback: read from session store
+      const storeTokens = this.readSessionStoreTokens();
+      if (storeTokens) {
+        log.info('recordSessionStats: using session store fallback', storeTokens);
+        incrementSessionStats(this.deps.sessionKey, storeTokens);
+        return;
+      }
+
+      log.warn('recordSessionStats: no token data available');
+      incrementSessionStats(this.deps.sessionKey, {});
     } catch (err) {
       log.error('recordSessionStats failed', { error: String(err) });
       incrementSessionStats(this.deps.sessionKey, {});
@@ -217,6 +268,40 @@ export class StreamingCardController {
       const runtime = LarkClient.runtime as Record<string, unknown> | null;
       if (!runtime) return undefined;
 
+      // Helper: read contextTokens + model from session store (fallback)
+      const readSessionStoreFallback = (): { contextTokens?: number; model?: string } => {
+        try {
+          const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
+          const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
+          const key = this.deps.sessionKey.trim().toLowerCase();
+          const defaultAgentId = resolveDefaultAgentId(this.deps.cfg as Record<string, unknown>);
+          const fallbackKey = key.replace(/^(agent):[^:]+:/, `$1:${defaultAgentId}:`);
+          const candidateKeys = fallbackKey !== key ? [key, fallbackKey] : [key];
+
+          const agentAny = (runtime as Record<string, unknown>).agent as Record<string, unknown> | undefined;
+          const sessionApi = agentAny?.session as Record<string, unknown> | undefined;
+          const resolveStorePath = sessionApi?.resolveStorePath as ((storePath?: string, opts?: { agentId?: string }) => string) | undefined;
+          const loadSessionStore = sessionApi?.loadSessionStore as ((storePath: string) => Record<string, Record<string, unknown>>) | undefined;
+
+          if (resolveStorePath && loadSessionStore) {
+            const storePath = resolveStorePath(sessionStorePath, { agentId: this.deps.agentId });
+            const store = loadSessionStore(storePath);
+
+            for (const candidate of candidateKeys) {
+              const val = store[candidate];
+              if (val && typeof val === 'object') {
+                const entry = val as Record<string, unknown>;
+                return {
+                  contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
+                  model: typeof entry.model === 'string' ? entry.model : undefined,
+                };
+              }
+            }
+          }
+        } catch { /* ignore */ }
+        return {};
+      };
+
       // Priority 1: Read from lastUsage (current turn's real-time data)
       const agent = runtime.agent as Record<string, unknown> | undefined;
       const session = agent?.session as Record<string, unknown> | undefined;
@@ -233,8 +318,17 @@ export class StreamingCardController {
         const model = typeof lastUsage.model === 'string' ? lastUsage.model : undefined;
 
         if (inputTokens != null || outputTokens != null) {
-          log.debug('footer metrics: using lastUsage (current turn)', { inputTokens, outputTokens, cacheRead, cacheWrite });
-          return { inputTokens, outputTokens, cacheRead, cacheWrite, totalTokens, contextTokens, model };
+          // lastUsage has token data but may lack contextTokens (OpenClaw doesn't include it)
+          // Supplement from session store if needed
+          let resolvedContextTokens = contextTokens;
+          let resolvedModel = model;
+          if (resolvedContextTokens == null || resolvedModel == null) {
+            const fallback = readSessionStoreFallback();
+            if (resolvedContextTokens == null) resolvedContextTokens = fallback.contextTokens;
+            if (resolvedModel == null) resolvedModel = fallback.model;
+          }
+          log.debug('footer metrics: using lastUsage (current turn)', { inputTokens, outputTokens, cacheRead, cacheWrite, contextTokens: resolvedContextTokens });
+          return { inputTokens, outputTokens, cacheRead, cacheWrite, totalTokens, contextTokens: resolvedContextTokens, model: resolvedModel };
         }
       }
 
