@@ -101,6 +101,11 @@ export class StreamingFooter {
     this.sessionKey = sessionKey;
   }
 
+  /** Update the session key (e.g. when sessionId is resolved at runtime). */
+  setSessionKey(sessionKey: string): void {
+    this.sessionKey = sessionKey;
+  }
+
   /** Initialize the footer (call once when streaming starts). */
   init(): void {
     if (this.state.initialized) return;

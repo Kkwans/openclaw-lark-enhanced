@@ -869,6 +869,7 @@ export function buildStreamingPreAnswerCard(params: {
         type: 'default',
         value: {
           action: 'streaming_pause',
+          command: '/stop',
         },
       },
     ],

@@ -48,7 +48,7 @@ import { type ToolUseDisplayResult, buildToolUseTitleSuffix, normalizeToolUseDis
 import { clearToolUseTraceRun, getToolUseTraceSteps } from './tool-use-trace-store';
 import { StreamingFooter } from './streaming-footer';
 import { registerPauseTarget, unregisterPauseTarget } from './pause-registry';
-import { incrementSessionStats, resetSessionStatsIfNewSession } from './session-stats';
+import { incrementSessionStats, resolveSessionStatsKey } from './session-stats';
 import type {
   CardKitState,
   CardPhase,
@@ -132,6 +132,8 @@ export class StreamingCardController {
   private dispatchFullyComplete = false;
   private cardCreationPromise: Promise<void> | null = null;
   private disposeShutdownHook: (() => void) | null = null;
+  // sessionId-based key for session stats (resolved at runtime)
+  private sessionStatsKey: string | null = null;
   private readonly dispatchStartTime = Date.now();
 
   // ---- Injected dependencies ----
@@ -192,7 +194,8 @@ export class StreamingCardController {
       const runtime = LarkClient.runtime as Record<string, unknown> | null;
       if (!runtime) { incrementSessionStats(this.deps.sessionKey, {}); return; }
 
-      // 检测会话重启：如果 sessionId 变了，重置统计
+      // 从 session store 读取 sessionId，用作统计主键
+      let statsKey = this.deps.sessionKey;
       try {
         const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
         const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
@@ -206,9 +209,11 @@ export class StreamingCardController {
           const key = this.deps.sessionKey.trim().toLowerCase();
           const entry = store[key] as Record<string, unknown> | undefined;
           const sessionId = entry?.sessionId as string | undefined;
-          resetSessionStatsIfNewSession(this.deps.sessionKey, sessionId);
+          statsKey = resolveSessionStatsKey(this.deps.sessionKey, sessionId);
+          this.sessionStatsKey = statsKey;
+          this.streamingFooter.setSessionKey(statsKey);
         }
-      } catch { /* 检测失败不影响统计 */ }
+      } catch { /* 检测失败使用原始 sessionKey */ }
 
       const agent = runtime.agent as Record<string, unknown> | undefined;
       const session = agent?.session as Record<string, unknown> | undefined;
@@ -222,14 +227,14 @@ export class StreamingCardController {
         const cacheWrite = typeof lastUsage.cacheWrite === 'number' ? lastUsage.cacheWrite : undefined;
         if (input != null || output != null || cacheRead != null || cacheWrite != null) {
           log.info('recordSessionStats: lastUsage found', { input, output, cacheRead, cacheWrite });
-          incrementSessionStats(this.deps.sessionKey, { input, output, cacheRead, cacheWrite });
+          incrementSessionStats(statsKey, { input, output, cacheRead, cacheWrite });
           return;
         }
       }
 
       // Fallback: 只记录轮次，不记录 token（session store 是累计数据，不是本轮数据）
       log.warn('recordSessionStats: no lastUsage available, incrementing turn count only');
-      incrementSessionStats(this.deps.sessionKey, {});
+      incrementSessionStats(statsKey, {});
     } catch (err) {
       log.error('recordSessionStats failed', { error: String(err) });
       incrementSessionStats(this.deps.sessionKey, {});

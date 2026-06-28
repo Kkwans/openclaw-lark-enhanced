@@ -148,9 +148,6 @@ function monthKey(): string {
   return today.slice(0, 7); // YYYY-MM
 }
 
-// Track last known sessionId per sessionKey for restart detection
-const lastSessionIds = new Map<string, string>();
-
 // Pre-compiled statements for ensureRow (avoid SQL injection from table/column names)
 const ENSURE_SESSION = 'INSERT OR IGNORE INTO session_stats (session_key) VALUES (?)';
 const ENSURE_DAILY = 'INSERT OR IGNORE INTO daily_stats (date_key) VALUES (?)';
@@ -162,35 +159,18 @@ const ENSURE_MONTHLY = 'INSERT OR IGNORE INTO monthly_stats (month_key) VALUES (
 
 /**
  * Detect session restart by comparing sessionId from session store.
- * If the sessionId changed since last check, reset session stats
- * so turns/tokens reflect the current conversation only.
+ * Returns the effective session stats key: `sessionId` if available,
+ * otherwise falls back to the original sessionKey.
  *
  * @param sessionKey - The session key (e.g. 'agent:main:main')
  * @param currentSessionId - The sessionId from the session store
+ * @returns The effective key to use for session stats
  */
-export function resetSessionStatsIfNewSession(
+export function resolveSessionStatsKey(
   sessionKey: string,
   currentSessionId: string | undefined,
-): void {
-  if (!currentSessionId) return;
-  const prev = lastSessionIds.get(sessionKey);
-  if (prev === currentSessionId) return; // same session, no reset needed
-
-  lastSessionIds.set(sessionKey, currentSessionId);
-
-  if (prev === undefined) {
-    // First time seeing this sessionKey — no reset needed
-    return;
-  }
-
-  // SessionId changed — reset session stats (but keep daily/monthly)
-  try {
-    const d = getDb();
-    d.prepare('DELETE FROM session_stats WHERE session_key = ?').run(sessionKey);
-    log.info('session stats reset due to new session', { sessionKey, prevSessionId: prev, newSessionId: currentSessionId });
-  } catch (err) {
-    log.error('failed to reset session stats', { error: String(err), sessionKey });
-  }
+): string {
+  return currentSessionId ?? sessionKey;
 }
 
 export function incrementSessionStats(
