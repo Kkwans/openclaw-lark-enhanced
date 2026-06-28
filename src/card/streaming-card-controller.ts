@@ -232,8 +232,15 @@ export class StreamingCardController {
         }
       }
 
-      // Fallback: 只记录轮次，不记录 token（session store 是累计数据，不是本轮数据）
-      log.warn('recordSessionStats: no lastUsage available, incrementing turn count only');
+      // Fallback: 从 session store 读取当前 run 的 token 数据
+      const storeTokens = this.readSessionStoreTokens();
+      if (storeTokens && (storeTokens.input || storeTokens.output)) {
+        log.info('recordSessionStats: using session store tokens', storeTokens);
+        incrementSessionStats(statsKey, storeTokens);
+        return;
+      }
+
+      log.warn('recordSessionStats: no token data available, incrementing turn count only');
       incrementSessionStats(statsKey, {});
     } catch (err) {
       log.error('recordSessionStats failed', { error: String(err) });
@@ -376,10 +383,14 @@ export class StreamingCardController {
         }
 
         if (entry) {
-          // 只返回配置类数据（contextTokens、model）
-          // token 数据（inputTokens、outputTokens 等）是会话累计值，不在此返回
-          // footer 的 token 信息应来自 lastUsage（本轮对话数据）
+          // session store 中的 inputTokens/outputTokens 是当前 run 的 token 使用量（由 persistSessionUsageUpdate 写入）
+          // 不是累计值，可以作为 footer 和 stats 的数据源
           return {
+            inputTokens: typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined,
+            outputTokens: typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined,
+            cacheRead: typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined,
+            cacheWrite: typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined,
+            totalTokens: typeof entry.totalTokens === 'number' ? entry.totalTokens : undefined,
             contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
             model: typeof entry.model === 'string' ? entry.model : undefined,
           };
