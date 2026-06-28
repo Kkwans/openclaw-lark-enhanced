@@ -130,6 +130,10 @@ export class StreamingCardController {
   private createEpoch = 0;
   private _terminalReason: TerminalReason | null = null;
   private dispatchFullyComplete = false;
+  /** Set when the user clicks the stop button, preventing onIdle from overwriting the abort card. */
+  private abortRequested = false;
+  /** Set when onDeliver just populated streamingPrefix, to prevent onPartialReply from duplicating. */
+  private deliverJustSetPrefix = false;
   private cardCreationPromise: Promise<void> | null = null;
   private disposeShutdownHook: (() => void) | null = null;
   // sessionId-based key for session stats (resolved at runtime)
@@ -223,8 +227,10 @@ export class StreamingCardController {
     }
   }
 
-  /** Record session statistics for this turn. */
-  private recordSessionStats(): void {
+  /** Record session statistics for this turn.
+   * @param allowStoreFallback 是否允许从 session store 读取 token 数据作为 fallback。中止时应为 false，避免写入上一轮的过期数据。
+   */
+  private recordSessionStats(allowStoreFallback = true): void {
     try {
       const runtime = LarkClient.runtime as Record<string, unknown> | null;
       if (!runtime) { incrementSessionStats(this.deps.sessionKey, {}); return; }
@@ -268,6 +274,10 @@ export class StreamingCardController {
       }
 
       // Fallback: 从 session store 读取当前 run 的 token 数据
+      if (!allowStoreFallback) {
+        log.warn('recordSessionStats: no lastUsage data, skipping store fallback (abort context)');
+        return;
+      }
       const storeTokens = this.readSessionStoreTokens();
       if (storeTokens && (storeTokens.input || storeTokens.output)) {
         log.info('recordSessionStats: using session store tokens', storeTokens);
@@ -692,6 +702,7 @@ export class StreamingCardController {
     if (!this.text.lastPartialText && !this.text.streamingPrefix) {
       this.text.accumulatedText += (this.text.accumulatedText ? '\n\n' : '') + answerText;
       this.text.streamingPrefix = this.text.accumulatedText;
+      this.deliverJustSetPrefix = true;
       await this.throttledCardUpdate();
     }
   }
@@ -802,10 +813,13 @@ export class StreamingCardController {
     this.text.lastPartialText = text;
     // 防止 onDeliver 设置的 streamingPrefix 与 onPartialReply 的 text 重复拼接
     // 当 onDeliver 先处理了初始文本并设置 streamingPrefix，onPartialReply 收到相同文本时不应重复拼接
-    if (this.text.streamingPrefix && this.text.streamingPrefix.includes(text)) {
+    if (this.deliverJustSetPrefix) {
+      this.deliverJustSetPrefix = false;
       this.text.accumulatedText = this.text.streamingPrefix;
+    } else if (this.text.streamingPrefix) {
+      this.text.accumulatedText = this.text.streamingPrefix + '\n\n' + text;
     } else {
-      this.text.accumulatedText = this.text.streamingPrefix ? this.text.streamingPrefix + '\n\n' + text : text;
+      this.text.accumulatedText = text;
     }
 
     // NO_REPLY 缓冲
@@ -888,6 +902,8 @@ export class StreamingCardController {
 
     if (!this.dispatchFullyComplete) return;
 
+    // 用户点击了停止按钮，不覆盖 abort 的卡片
+    if (this.abortRequested) return;
     if (this.isTerminalPhase) return;
     this.captureToolUseElapsed();
     this.finalizeCard('onIdle', 'normal');
@@ -1007,6 +1023,7 @@ export class StreamingCardController {
 
   async abortCard(): Promise<void> {
     try {
+      this.abortRequested = true;
       this.captureToolUseElapsed();
       if (!this.transition('aborted', 'abortCard', 'abort')) return;
 
@@ -1027,8 +1044,8 @@ export class StreamingCardController {
         this.imageResolver,
       );
       const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
-      // 中断时不记录统计数据——session store 中的 token 数据是上一轮的，不是当前轮的
-      // 只有正常完成时 lastUsage 才有当前轮的真实数据
+      // 中止时只记录 lastUsage 中的当前轮数据，不从 session store 读取（那是上一轮的过期数据）
+      this.recordSessionStats(false);
       if (effectiveCardId) {
         const abortCardContent = buildCardContent('complete', {
           text: terminalContent.text,
