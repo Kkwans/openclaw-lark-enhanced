@@ -597,9 +597,11 @@ export class StreamingCardController {
         // Save text accumulated before reasoning started
         this.textBeforeReasoning = this.text.accumulatedText;
       }
-      this.reasoning.reasoningElapsedMs = this.reasoning.reasoningStartTime
-        ? Date.now() - this.reasoning.reasoningStartTime
-        : 0;
+      // Ensure reasoningStartTime is set (may not be set if reasoning arrives via deliver instead of stream)
+      if (!this.reasoning.reasoningStartTime) {
+        this.reasoning.reasoningStartTime = Date.now();
+      }
+      this.reasoning.reasoningElapsedMs = Date.now() - this.reasoning.reasoningStartTime;
       this.reasoning.accumulatedReasoningText = split.reasoningText;
       this.reasoning.isReasoningPhase = true;
       await this.throttledCardUpdate();
