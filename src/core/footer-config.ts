@@ -27,9 +27,9 @@ export const DEFAULT_FOOTER_CONFIG: Required<FeishuFooterConfig> = {
   cache: false,
   context: false,
   model: false,
-  sessionStats: false,
-  dailyStats: false,
-  monthlyStats: false,
+  sessionStats: true,
+  dailyStats: true,
+  monthlyStats: true,
 };
 
 // ---------------------------------------------------------------------------
