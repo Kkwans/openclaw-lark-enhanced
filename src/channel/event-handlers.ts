@@ -417,17 +417,31 @@ function handlePauseAction(data: unknown): unknown | undefined {
     if (actionValue !== 'streaming_pause') return undefined;
 
     // Extract message_id from the card action context
-    const msgId = (data as Record<string, unknown>)?.open_message_id as string
+    // Feishu card.action.trigger event structure:
+    // { open_message_id: '...', context: { open_message_id: '...' }, action: { value: { action: '...' } } }
+    const dataRecord = data as Record<string, unknown>;
+    const context = dataRecord?.context as Record<string, unknown> | undefined;
+    const msgId = (dataRecord?.open_message_id as string)
+      ?? (context?.open_message_id as string)
       ?? (action?.action as Record<string, unknown>)?.open_message_id as string;
+
+    elog.info('streaming pause button clicked', {
+      messageId: msgId,
+      hasTarget: msgId ? !!getPauseTarget(msgId) : false,
+    });
+
     if (!msgId) return undefined;
 
     const target = getPauseTarget(msgId);
     if (target) {
       target.abortController.abort();
       elog.info('streaming pause triggered', { messageId: msgId });
+    } else {
+      elog.warn('streaming pause: no target found for message', { messageId: msgId });
     }
     return {}; // Return empty object to acknowledge the action
-  } catch {
+  } catch (err) {
+    elog.warn('handlePauseAction error', { error: String(err) });
     return undefined;
   }
 }
