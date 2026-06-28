@@ -48,7 +48,7 @@ import { type ToolUseDisplayResult, buildToolUseTitleSuffix, normalizeToolUseDis
 import { clearToolUseTraceRun, getToolUseTraceSteps } from './tool-use-trace-store';
 import { StreamingFooter } from './streaming-footer';
 import { registerPauseTarget, unregisterPauseTarget } from './pause-registry';
-import { incrementSessionStats } from './session-stats';
+import { incrementSessionStats, resetSessionStatsIfNewSession } from './session-stats';
 import type {
   CardKitState,
   CardPhase,
@@ -192,6 +192,24 @@ export class StreamingCardController {
       const runtime = LarkClient.runtime as Record<string, unknown> | null;
       if (!runtime) { incrementSessionStats(this.deps.sessionKey, {}); return; }
 
+      // 检测会话重启：如果 sessionId 变了，重置统计
+      try {
+        const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
+        const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
+        const agent = runtime.agent as Record<string, unknown> | undefined;
+        const sessionApi = agent?.session as Record<string, unknown> | undefined;
+        const resolveStorePath = sessionApi?.resolveStorePath as ((storePath?: string, opts?: { agentId?: string }) => string) | undefined;
+        const loadSessionStore = sessionApi?.loadSessionStore as ((storePath: string) => Record<string, Record<string, unknown>>) | undefined;
+        if (resolveStorePath && loadSessionStore) {
+          const storePath = resolveStorePath(sessionStorePath, { agentId: this.deps.agentId });
+          const store = loadSessionStore(storePath);
+          const key = this.deps.sessionKey.trim().toLowerCase();
+          const entry = store[key] as Record<string, unknown> | undefined;
+          const sessionId = entry?.sessionId as string | undefined;
+          resetSessionStatsIfNewSession(this.deps.sessionKey, sessionId);
+        }
+      } catch { /* 检测失败不影响统计 */ }
+
       const agent = runtime.agent as Record<string, unknown> | undefined;
       const session = agent?.session as Record<string, unknown> | undefined;
       const lastUsage = session?.lastUsage as Record<string, unknown> | undefined;
@@ -209,15 +227,8 @@ export class StreamingCardController {
         }
       }
 
-      // Fallback: read from session store
-      const storeTokens = this.readSessionStoreTokens();
-      if (storeTokens) {
-        log.info('recordSessionStats: using session store fallback', storeTokens);
-        incrementSessionStats(this.deps.sessionKey, storeTokens);
-        return;
-      }
-
-      log.warn('recordSessionStats: no token data available');
+      // Fallback: 只记录轮次，不记录 token（session store 是累计数据，不是本轮数据）
+      log.warn('recordSessionStats: no lastUsage available, incrementing turn count only');
       incrementSessionStats(this.deps.sessionKey, {});
     } catch (err) {
       log.error('recordSessionStats failed', { error: String(err) });
@@ -360,12 +371,10 @@ export class StreamingCardController {
         }
 
         if (entry) {
+          // 只返回配置类数据（contextTokens、model）
+          // token 数据（inputTokens、outputTokens 等）是会话累计值，不在此返回
+          // footer 的 token 信息应来自 lastUsage（本轮对话数据）
           return {
-            inputTokens: typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined,
-            outputTokens: typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined,
-            cacheRead: typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined,
-            cacheWrite: typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined,
-            totalTokens: typeof entry.totalTokens === 'number' ? entry.totalTokens : undefined,
             contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
             model: typeof entry.model === 'string' ? entry.model : undefined,
           };
