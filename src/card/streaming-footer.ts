@@ -114,7 +114,7 @@ export class StreamingFooter {
   }
 
   /** Build formatted footer content for current state. */
-  buildContent(metrics?: FooterSessionMetrics, isTerminal = false): string {
+  buildContent(metrics?: FooterSessionMetrics, isTerminal = false, isAborted = false): string {
     const lines: string[] = [];
     const { config } = this;
 
@@ -193,7 +193,13 @@ export class StreamingFooter {
     // Status + elapsed + model
     const primaryParts: string[] = [];
     if (config.status) {
-      primaryParts.push(isTerminal ? '✅ 已完成' : '⏳ 生成中');
+      if (isAborted) {
+        primaryParts.push('⏹️ 已停止');
+      } else if (isTerminal) {
+        primaryParts.push('✅ 已完成');
+      } else {
+        primaryParts.push('⏳ 生成中');
+      }
     }
     if (config.elapsed) {
       const elapsed = Date.now() - this.state.startTime;

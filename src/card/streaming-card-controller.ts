@@ -1027,8 +1027,8 @@ export class StreamingCardController {
         this.imageResolver,
       );
       const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
-      // Record session stats AFTER getFooterSessionMetrics() to ensure lastUsage is available
-      this.recordSessionStats();
+      // 中断时不记录统计数据——session store 中的 token 数据是上一轮的，不是当前轮的
+      // 只有正常完成时 lastUsage 才有当前轮的真实数据
       if (effectiveCardId) {
         const abortCardContent = buildCardContent('complete', {
           text: terminalContent.text,
@@ -1044,7 +1044,7 @@ export class StreamingCardController {
           completedOutputs: this.getCompletedOutputTexts().length > 0 ? this.getCompletedOutputTexts() : undefined,
           footer: this.deps.resolvedFooter,
           footerMetrics,
-          footerContent: this.streamingFooter.buildContent(footerMetrics, true),
+          footerContent: this.streamingFooter.buildContent(footerMetrics, true, true),
         });
         await this.closeStreamingAndUpdate(effectiveCardId, abortCardContent, 'abortCard');
         log.info('abortCard completed', { effectiveCardId });
@@ -1064,7 +1064,7 @@ export class StreamingCardController {
           completedOutputs: this.getCompletedOutputTexts().length > 0 ? this.getCompletedOutputTexts() : undefined,
           footer: this.deps.resolvedFooter,
           footerMetrics,
-          footerContent: this.streamingFooter.buildContent(footerMetrics, true),
+          footerContent: this.streamingFooter.buildContent(footerMetrics, true, true),
         });
         await updateCardFeishu({
           cfg: this.deps.cfg,
