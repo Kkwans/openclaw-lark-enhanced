@@ -21,7 +21,6 @@ import { registerShutdownHook } from '../core/shutdown-hooks';
 import { sendCardFeishu, updateCardFeishu } from '../messaging/outbound/send';
 import {
   STREAMING_ELEMENT_ID,
-  STREAMING_REASONING_ELEMENT_ID,
   buildCardContent,
   buildStreamingPreAnswerCard,
   buildStreamingThinkingCard,
@@ -259,36 +258,8 @@ export class StreamingCardController {
       + (this.reasoning.accumulatedReasoningText?.length || 0);
     // Rough estimate: ~1.5 chars per token for Chinese/mixed content
     const estimatedOutputTokens = Math.round(totalChars / 1.5);
-
-    // Read contextTokens and model from session store for footer display
-    let contextTokens: number | undefined;
-    let model: string | undefined;
-    try {
-      const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
-      const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
-      const key = this.deps.sessionKey.trim().toLowerCase();
-      const runtime = LarkClient.runtime as Record<string, unknown> | null;
-      if (runtime) {
-        const agentAny = (runtime as Record<string, unknown>).agent as Record<string, unknown> | undefined;
-        const sessionApi = agentAny?.session as Record<string, unknown> | undefined;
-        const resolveStorePath = sessionApi?.resolveStorePath as ((storePath?: string, opts?: { agentId?: string }) => string) | undefined;
-        const loadSessionStore = sessionApi?.loadSessionStore as ((storePath: string) => Record<string, Record<string, unknown>>) | undefined;
-        if (resolveStorePath && loadSessionStore) {
-          const storePath = resolveStorePath(sessionStorePath, { agentId: this.deps.agentId });
-          const store = loadSessionStore(storePath);
-          const entry = store[key];
-          if (entry && typeof entry === 'object') {
-            contextTokens = typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined;
-            model = typeof entry.model === 'string' ? entry.model : undefined;
-          }
-        }
-      }
-    } catch { /* ignore */ }
-
     return {
       outputTokens: estimatedOutputTokens > 0 ? estimatedOutputTokens : undefined,
-      contextTokens,
-      model,
     };
   }
 
@@ -1210,67 +1181,39 @@ export class StreamingCardController {
       const resolvedText = this.imageResolver.resolveImages(displayText);
 
       if (this.cardKit.cardKitCardId) {
+        // CardKit path: update full card via card.update API
+        // (supports all enhanced features: footer, thinking panels, stop button)
         const flushDisplay = this.computeToolUseDisplay();
+        // During streaming, estimate output tokens from text length.
+        // lastUsage is stale (previous turn), so we estimate instead.
+        // At terminal states (onIdle/onComplete/onAbort), real data is used.
         const streamingMetrics = this.getStreamingEstimateMetrics();
         const footerContent = this.streamingFooter.shouldUpdate()
           ? this.streamingFooter.buildContent(streamingMetrics)
           : undefined;
-
-        if (this.reasoning.isReasoningPhase && this.reasoning.accumulatedReasoningText) {
-          // CardKit reasoning phase: use element-level streaming for typewriter effect
-          // This avoids the "snowball" issue where updateCardKitCard sends the full
-          // card JSON each time, causing CardKit to re-render the entire reasoning text.
-          const reasoningDisplay = `💭 **思考中...**\n\n${this.reasoning.accumulatedReasoningText}`;
-          this.cardKit.cardKitSequence += 1;
-          await streamCardContent({
-            cfg: this.deps.cfg,
-            cardId: this.cardKit.cardKitCardId,
-            elementId: STREAMING_REASONING_ELEMENT_ID,
-            content: reasoningDisplay,
-            sequence: this.cardKit.cardKitSequence,
-            accountId: this.deps.accountId,
-          });
-          // Update footer separately (does not interfere with reasoning streaming)
-          if (footerContent) {
-            const footerCard = buildCardContent('streaming', {
-              text: '',
-              showToolUse: this.deps.toolUseDisplay.showToolUse,
-              footerContent,
-            });
-            this.cardKit.cardKitSequence += 1;
-            await updateCardKitCard({
-              cfg: this.deps.cfg,
-              cardId: this.cardKit.cardKitCardId,
-              card: toCardKit2(footerCard),
-              sequence: this.cardKit.cardKitSequence,
-              accountId: this.deps.accountId,
-            });
-          }
-        } else {
-          // CardKit answer phase: update full card via card.update API
-          const card = buildCardContent('streaming', {
-            text: resolvedText,
-            toolUseSteps: flushDisplay?.steps,
-            toolUseTitleSuffix: this.computeToolUseTitleSuffix(flushDisplay),
-            showToolUse: this.deps.toolUseDisplay.showToolUse,
-            completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
-            completedOutputs: this.getCompletedOutputTexts().length > 0 ? this.getCompletedOutputTexts() : undefined,
-            footerContent,
-          });
-          const prevSeq = this.cardKit.cardKitSequence;
-          this.cardKit.cardKitSequence += 1;
-          log.debug('flushCardUpdate: CardKit full card update', {
-            seqBefore: prevSeq,
-            seqAfter: this.cardKit.cardKitSequence,
-          });
-          await updateCardKitCard({
-            cfg: this.deps.cfg,
-            cardId: this.cardKit.cardKitCardId,
-            card: toCardKit2(card),
-            sequence: this.cardKit.cardKitSequence,
-            accountId: this.deps.accountId,
-          });
-        }
+        const card = buildCardContent('streaming', {
+          text: this.reasoning.isReasoningPhase ? '' : resolvedText,
+          reasoningText: this.reasoning.isReasoningPhase ? this.reasoning.accumulatedReasoningText : undefined,
+          toolUseSteps: flushDisplay?.steps,
+          toolUseTitleSuffix: this.computeToolUseTitleSuffix(flushDisplay),
+          showToolUse: this.deps.toolUseDisplay.showToolUse,
+          completedReasonings: this.completedReasonings.length > 0 ? this.completedReasonings : undefined,
+          completedOutputs: this.getCompletedOutputTexts().length > 0 ? this.getCompletedOutputTexts() : undefined,
+          footerContent,
+        });
+        const prevSeq = this.cardKit.cardKitSequence;
+        this.cardKit.cardKitSequence += 1;
+        log.debug('flushCardUpdate: CardKit full card update', {
+          seqBefore: prevSeq,
+          seqAfter: this.cardKit.cardKitSequence,
+        });
+        await updateCardKitCard({
+          cfg: this.deps.cfg,
+          cardId: this.cardKit.cardKitCardId,
+          card: toCardKit2(card),
+          sequence: this.cardKit.cardKitSequence,
+          accountId: this.deps.accountId,
+        });
         this.text.lastFlushedText = resolvedText;
       } else {
         log.debug('flushCardUpdate: IM patch fallback');

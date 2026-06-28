@@ -23,8 +23,6 @@ import { EMPTY_TOOL_USE_PLACEHOLDER, type ToolUseDisplayStep } from './tool-use-
  */
 export const STREAMING_ELEMENT_ID = 'streaming_content';
 export const REASONING_ELEMENT_ID = 'reasoning_content';
-/** Element ID for the streaming reasoning content in CardKit cards. */
-export const STREAMING_REASONING_ELEMENT_ID = 'streaming_reasoning';
 const TOOL_USE_STEP_CONTENT_INDENT = '0px 0px 0px 22px';
 
 // ---------------------------------------------------------------------------
@@ -452,7 +450,6 @@ function buildStreamingCard(
         en_us: `💭 **Thinking...**\n\n${reasoningText}`,
       },
       text_size: 'notation',
-      element_id: STREAMING_REASONING_ELEMENT_ID,
     });
   } else if (partialText) {
     // Answer phase: show answer content only
