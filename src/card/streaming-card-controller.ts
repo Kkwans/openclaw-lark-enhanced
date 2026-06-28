@@ -655,10 +655,9 @@ export class StreamingCardController {
     }
     this.reasoning.isReasoningPhase = true;
     const split = splitReasoningText(rawText);
-    const newReasoningText = split.reasoningText ?? rawText;
-    // Append to accumulated reasoning text (not replace) — multiple
-    // reasoning chunks may arrive for a single thinking phase.
-    this.reasoning.accumulatedReasoningText += (this.reasoning.accumulatedReasoningText ? '\n' : '') + newReasoningText;
+    // Replace (not append) — the framework sends the full accumulated
+    // reasoning text on each callback, not incremental deltas.
+    this.reasoning.accumulatedReasoningText = split.reasoningText ?? rawText;
     await this.throttledCardUpdate();
   }
 
@@ -1184,10 +1183,8 @@ export class StreamingCardController {
         // CardKit path: update full card via card.update API
         // (supports all enhanced features: footer, thinking panels, stop button)
         const flushDisplay = this.computeToolUseDisplay();
-        // During streaming, estimate output tokens from text length.
-        // lastUsage is stale (previous turn), so we estimate instead.
-        // At terminal states (onIdle/onComplete/onAbort), real data is used.
-        const streamingMetrics = this.getStreamingEstimateMetrics();
+        // Read real metrics from session store (not estimates)
+        const streamingMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
         const footerContent = this.streamingFooter.shouldUpdate()
           ? this.streamingFooter.buildContent(streamingMetrics)
           : undefined;
@@ -1218,8 +1215,8 @@ export class StreamingCardController {
       } else {
         log.debug('flushCardUpdate: IM patch fallback');
         const flushDisplay = this.computeToolUseDisplay();
-        // During streaming, estimate output tokens from text length.
-        const streamingMetrics = this.getStreamingEstimateMetrics();
+        // Read real metrics from session store
+        const streamingMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
         const footerContent = this.streamingFooter.shouldUpdate()
           ? this.streamingFooter.buildContent(streamingMetrics)
           : undefined;
