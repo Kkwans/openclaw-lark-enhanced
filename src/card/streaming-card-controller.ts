@@ -188,6 +188,41 @@ export class StreamingCardController {
     return undefined;
   }
 
+  /**
+   * Get live metrics from the runtime for real-time streaming footer display.
+   * Unlike getFooterSessionMetrics() which reads from the session store file
+   * (only updated after a turn completes), this reads from the in-memory
+   * lastUsage object which the SDK updates during the current API call.
+   *
+   * lastUsage fields: input, output, cacheRead, cacheWrite, total
+   */
+  private getStreamingLiveMetrics(): FooterSessionMetrics | undefined {
+    try {
+      const runtime = LarkClient.runtime as Record<string, unknown> | null;
+      const agent = runtime?.agent as Record<string, unknown> | undefined;
+      const session = agent?.session as Record<string, unknown> | undefined;
+      const lastUsage = session?.lastUsage as Record<string, unknown> | undefined;
+      log.info('getStreamingLiveMetrics: lastUsage dump', {
+        hasLastUsage: !!lastUsage,
+        keys: lastUsage ? Object.keys(lastUsage) : [],
+        raw: lastUsage ? JSON.stringify(lastUsage).slice(0, 500) : 'null',
+      });
+      if (!lastUsage) return undefined;
+
+      return {
+        inputTokens: typeof lastUsage.input === 'number' ? lastUsage.input : undefined,
+        outputTokens: typeof lastUsage.output === 'number' ? lastUsage.output : undefined,
+        cacheRead: typeof lastUsage.cacheRead === 'number' ? lastUsage.cacheRead : undefined,
+        cacheWrite: typeof lastUsage.cacheWrite === 'number' ? lastUsage.cacheWrite : undefined,
+        totalTokens: typeof lastUsage.total === 'number' ? lastUsage.total : undefined,
+        contextTokens: undefined, // lastUsage doesn't have contextTokens
+        model: typeof lastUsage.model === 'string' ? lastUsage.model : undefined,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Record session statistics for this turn. */
   private recordSessionStats(): void {
     try {
@@ -1208,8 +1243,8 @@ export class StreamingCardController {
         // CardKit path: update full card via card.update API
         // (supports all enhanced features: footer, thinking panels, stop button)
         const flushDisplay = this.computeToolUseDisplay();
-        // Read real metrics from session store (not estimates)
-        const streamingMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
+        // Read real-time metrics from runtime memory (not stale session store)
+        const streamingMetrics = this.needsFooterMetrics() ? this.getStreamingLiveMetrics() : undefined;
         const footerContent = this.streamingFooter.shouldUpdate()
           ? this.streamingFooter.buildContent(streamingMetrics)
           : undefined;
@@ -1240,8 +1275,8 @@ export class StreamingCardController {
       } else {
         log.debug('flushCardUpdate: IM patch fallback');
         const flushDisplay = this.computeToolUseDisplay();
-        // Read real metrics from session store
-        const streamingMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
+        // Read real-time metrics from runtime memory (not stale session store)
+        const streamingMetrics = this.needsFooterMetrics() ? this.getStreamingLiveMetrics() : undefined;
         const footerContent = this.streamingFooter.shouldUpdate()
           ? this.streamingFooter.buildContent(streamingMetrics)
           : undefined;
