@@ -800,7 +800,13 @@ export class StreamingCardController {
       this.text.streamingPrefix += (this.text.streamingPrefix ? '\n\n' : '') + this.text.lastPartialText;
     }
     this.text.lastPartialText = text;
-    this.text.accumulatedText = this.text.streamingPrefix ? this.text.streamingPrefix + '\n\n' + text : text;
+    // 防止 onDeliver 设置的 streamingPrefix 与 onPartialReply 的 text 重复拼接
+    // 当 onDeliver 先处理了初始文本并设置 streamingPrefix，onPartialReply 收到相同文本时不应重复拼接
+    if (this.text.streamingPrefix && this.text.streamingPrefix.includes(text)) {
+      this.text.accumulatedText = this.text.streamingPrefix;
+    } else {
+      this.text.accumulatedText = this.text.streamingPrefix ? this.text.streamingPrefix + '\n\n' + text : text;
+    }
 
     // NO_REPLY 缓冲
     if (!this.text.streamingPrefix && SILENT_REPLY_TOKEN.startsWith(this.text.accumulatedText.trim())) {
@@ -1200,6 +1206,14 @@ export class StreamingCardController {
             return;
           }
           log.info('sent fallback IM card', { messageId: result.messageId });
+
+          // Register pause target for stop button (IM fallback path)
+          if (this.deps.abortController) {
+            registerPauseTarget(result.messageId, {
+              abortController: this.deps.abortController,
+              cardMessageId: result.messageId,
+            });
+          }
         }
       } catch (err) {
         if (this.isStaleCreate(epoch)) return;
@@ -1239,12 +1253,15 @@ export class StreamingCardController {
       // 流式中间帧使用同步 resolveImages（不等待异步上传）
       const resolvedText = this.imageResolver.resolveImages(displayText);
 
+      // 流式 footer 使用 getFooterSessionMetrics（含 session store fallback）
+      // 因为 lastUsage 在流式过程中始终为 null，无法获取实时 token 数据
+      // 但 session store 中的 contextTokens 和 model 是可用的
+      const streamingMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
+
       if (this.cardKit.cardKitCardId) {
         // CardKit path: update full card via card.update API
         // (supports all enhanced features: footer, thinking panels, stop button)
         const flushDisplay = this.computeToolUseDisplay();
-        // Read real-time metrics from runtime memory (not stale session store)
-        const streamingMetrics = this.needsFooterMetrics() ? this.getStreamingLiveMetrics() : undefined;
         const footerContent = this.streamingFooter.shouldUpdate()
           ? this.streamingFooter.buildContent(streamingMetrics)
           : undefined;
@@ -1275,8 +1292,6 @@ export class StreamingCardController {
       } else {
         log.debug('flushCardUpdate: IM patch fallback');
         const flushDisplay = this.computeToolUseDisplay();
-        // Read real-time metrics from runtime memory (not stale session store)
-        const streamingMetrics = this.needsFooterMetrics() ? this.getStreamingLiveMetrics() : undefined;
         const footerContent = this.streamingFooter.shouldUpdate()
           ? this.streamingFooter.buildContent(streamingMetrics)
           : undefined;

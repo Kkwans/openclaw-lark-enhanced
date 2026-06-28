@@ -853,6 +853,9 @@ export function buildStreamingPreAnswerCard(params: {
   });
 
   // Stop button (will be removed in terminal state)
+  // Note: CardKit V2 does not support the 'action' tag — this intentionally
+  // causes CardKit creation to fail and fall back to IM, where the stop button
+  // is functional. The IM fallback path registers the pause target (Fix 3).
   elements.push({
     tag: 'action',
     actions: [
