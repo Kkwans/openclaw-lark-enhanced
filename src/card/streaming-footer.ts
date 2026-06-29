@@ -139,12 +139,11 @@ export class StreamingFooter {
       lines.push('──────────────────────');
     }
 
-    // Detail line: tokens + cache + context
-    // During streaming, token counts and cache rate are unavailable (lastUsage
-    // is only populated after the LLM response completes). Skip them to avoid
-    // showing misleading "-" placeholders. Context and model are still shown.
+    // Streaming footer: single line with elapsed + model + context
+    // Terminal footer: two lines (detail + status/elapsed/model)
     const detailParts: string[] = [];
     if (isTerminal) {
+      // Terminal: detail line with tokens + cache + context
       if (config.tokens) {
         if (metrics) {
           const input = metrics.inputTokens ?? 0;
@@ -172,38 +171,39 @@ export class StreamingFooter {
           detailParts.push('⚡ -');
         }
       }
-    }
-    if (config.context) {
-      if (metrics) {
-        const used = metrics.totalTokens ?? 0;
-        const maxCtx = metrics.contextTokens ?? 0;
-        if (used > 0) {
-          if (maxCtx > 0) {
-            const pct = Math.round((used / maxCtx) * 100);
-            detailParts.push(`🧠 ${compactNumber(used)}/${compactNumber(maxCtx)} (${pct}%)`);
+      if (config.context) {
+        if (metrics) {
+          const used = metrics.totalTokens ?? 0;
+          const maxCtx = metrics.contextTokens ?? 0;
+          if (used > 0) {
+            if (maxCtx > 0) {
+              const pct = Math.round((used / maxCtx) * 100);
+              detailParts.push(`🧠 ${compactNumber(used)}/${compactNumber(maxCtx)} (${pct}%)`);
+            } else {
+              detailParts.push(`🧠 ${compactNumber(used)}`);
+            }
           } else {
-            detailParts.push(`🧠 ${compactNumber(used)}`);
+            detailParts.push('🧠 -');
           }
         } else {
           detailParts.push('🧠 -');
         }
-      } else {
-        detailParts.push('🧠 -');
+      }
+      if (detailParts.length > 0) {
+        lines.push(detailParts.join(' · '));
       }
     }
-    if (detailParts.length > 0) {
-      lines.push(detailParts.join(' · '));
-    }
 
-    // Status + elapsed + model
+    // Status + elapsed + model (terminal: separate line; streaming: single line with context)
     const primaryParts: string[] = [];
-    if (config.status) {
-      if (isAborted) {
-        primaryParts.push('⏹️ 已停止');
-      } else if (isTerminal) {
-        primaryParts.push('✅ 已完成');
-      } else {
-        primaryParts.push('⏳ 生成中');
+    if (isTerminal) {
+      // Terminal: status text
+      if (config.status) {
+        if (isAborted) {
+          primaryParts.push('⏹️ 已停止');
+        } else {
+          primaryParts.push('✅ 已完成');
+        }
       }
     }
     if (config.elapsed) {
@@ -212,6 +212,25 @@ export class StreamingFooter {
     }
     if (config.model && metrics?.model) {
       primaryParts.push(`🤖 ${metrics.model}`);
+    }
+    // Streaming: append context to the same line
+    if (!isTerminal && config.context) {
+      if (metrics) {
+        const used = metrics.totalTokens ?? 0;
+        const maxCtx = metrics.contextTokens ?? 0;
+        if (used > 0) {
+          if (maxCtx > 0) {
+            const pct = Math.round((used / maxCtx) * 100);
+            primaryParts.push(`🧠 ${compactNumber(used)}/${compactNumber(maxCtx)} (${pct}%)`);
+          } else {
+            primaryParts.push(`🧠 ${compactNumber(used)}`);
+          }
+        } else {
+          primaryParts.push('🧠 -');
+        }
+      } else {
+        primaryParts.push('🧠 -');
+      }
     }
     if (primaryParts.length > 0) {
       lines.push(primaryParts.join(' · '));
