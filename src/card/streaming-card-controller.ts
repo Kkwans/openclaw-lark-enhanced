@@ -161,7 +161,7 @@ export class StreamingCardController {
       const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
       const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
       const key = this.deps.sessionKey.trim().toLowerCase();
-      const defaultAgentId = resolveDefaultAgentId(this.deps.cfg as Record<string, unknown>);
+      const defaultAgentId = resolveDefaultAgentId(this.deps.cfg as Record<string, unknown>) || 'main';
       const fallbackKey = key.replace(/^(agent):[^:]+:/, `$1:${defaultAgentId}:`);
       const candidateKeys = fallbackKey !== key ? [key, fallbackKey] : [key];
 
@@ -291,7 +291,7 @@ export class StreamingCardController {
           const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
           const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
           const key = this.deps.sessionKey.trim().toLowerCase();
-          const defaultAgentId = resolveDefaultAgentId(this.deps.cfg as Record<string, unknown>);
+          const defaultAgentId = resolveDefaultAgentId(this.deps.cfg as Record<string, unknown>) || 'main';
           const fallbackKey = key.replace(/^(agent):[^:]+:/, `$1:${defaultAgentId}:`);
           const candidateKeys = fallbackKey !== key ? [key, fallbackKey] : [key];
 
@@ -356,7 +356,7 @@ export class StreamingCardController {
       const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
       const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
       const key = this.deps.sessionKey.trim().toLowerCase();
-      const defaultAgentId = resolveDefaultAgentId(this.deps.cfg as Record<string, unknown>);
+      const defaultAgentId = resolveDefaultAgentId(this.deps.cfg as Record<string, unknown>) || 'main';
       const fallbackKey = key.replace(/^(agent):[^:]+:/, `$1:${defaultAgentId}:`);
       const candidateKeys = fallbackKey !== key ? [key, fallbackKey] : [key];
 
