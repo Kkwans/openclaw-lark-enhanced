@@ -140,32 +140,37 @@ export class StreamingFooter {
     }
 
     // Detail line: tokens + cache + context
+    // During streaming, token counts and cache rate are unavailable (lastUsage
+    // is only populated after the LLM response completes). Skip them to avoid
+    // showing misleading "-" placeholders. Context and model are still shown.
     const detailParts: string[] = [];
-    if (config.tokens) {
-      if (metrics) {
-        const input = metrics.inputTokens ?? 0;
-        const output = metrics.outputTokens ?? 0;
-        if (input > 0 || output > 0) {
-          detailParts.push(`🪙 ${formatTokenCount(input)}+${formatTokenCount(output)}`);
+    if (isTerminal) {
+      if (config.tokens) {
+        if (metrics) {
+          const input = metrics.inputTokens ?? 0;
+          const output = metrics.outputTokens ?? 0;
+          if (input > 0 || output > 0) {
+            detailParts.push(`🪙 ${formatTokenCount(input)}+${formatTokenCount(output)}`);
+          } else {
+            detailParts.push('🪙 -');
+          }
         } else {
           detailParts.push('🪙 -');
         }
-      } else {
-        detailParts.push('🪙 -');
       }
-    }
-    if (config.cache) {
-      if (metrics) {
-        const read = metrics.cacheRead ?? 0;
-        const write = metrics.cacheWrite ?? 0;
-        const input = metrics.inputTokens ?? 0;
-        if (read > 0 || write > 0 || input > 0) {
-          detailParts.push(`⚡ ${formatCacheRate(read, write, input)}`);
+      if (config.cache) {
+        if (metrics) {
+          const read = metrics.cacheRead ?? 0;
+          const write = metrics.cacheWrite ?? 0;
+          const input = metrics.inputTokens ?? 0;
+          if (read > 0 || write > 0 || input > 0) {
+            detailParts.push(`⚡ ${formatCacheRate(read, write, input)}`);
+          } else {
+            detailParts.push('⚡ -');
+          }
         } else {
           detailParts.push('⚡ -');
         }
-      } else {
-        detailParts.push('⚡ -');
       }
     }
     if (config.context) {

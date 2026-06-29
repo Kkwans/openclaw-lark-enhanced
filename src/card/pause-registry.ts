@@ -8,6 +8,8 @@
 export interface PauseTarget {
   abortController: AbortController;
   cardMessageId: string;
+  /** Callback to abort the streaming card (transitions to aborted phase). */
+  onAbort?: () => Promise<void>;
 }
 
 const targets = new Map<string, PauseTarget>();

@@ -435,6 +435,10 @@ function handlePauseAction(data: unknown): unknown | undefined {
     const target = getPauseTarget(msgId);
     if (target) {
       target.abortController.abort();
+      // Also abort the streaming card (transitions to "⏹️ 已停止" state)
+      target.onAbort?.().catch((err) => {
+        elog.warn('streaming pause: onAbort failed', { error: String(err) });
+      });
       elog.info('streaming pause triggered', { messageId: msgId });
     } else {
       elog.warn('streaming pause: no target found for message', { messageId: msgId });

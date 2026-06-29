@@ -193,42 +193,7 @@ export class StreamingCardController {
   }
 
   /**
-   * Get live metrics from the runtime for real-time streaming footer display.
-   * Unlike getFooterSessionMetrics() which reads from the session store file
-   * (only updated after a turn completes), this reads from the in-memory
-   * lastUsage object which the SDK updates during the current API call.
-   *
-   * lastUsage fields: input, output, cacheRead, cacheWrite, total
-   */
-  private getStreamingLiveMetrics(): FooterSessionMetrics | undefined {
-    try {
-      const runtime = LarkClient.runtime as Record<string, unknown> | null;
-      const agent = runtime?.agent as Record<string, unknown> | undefined;
-      const session = agent?.session as Record<string, unknown> | undefined;
-      const lastUsage = session?.lastUsage as Record<string, unknown> | undefined;
-      log.info('getStreamingLiveMetrics: lastUsage dump', {
-        hasLastUsage: !!lastUsage,
-        keys: lastUsage ? Object.keys(lastUsage) : [],
-        raw: lastUsage ? JSON.stringify(lastUsage).slice(0, 500) : 'null',
-      });
-      if (!lastUsage) return undefined;
-
-      return {
-        inputTokens: typeof lastUsage.input === 'number' ? lastUsage.input : undefined,
-        outputTokens: typeof lastUsage.output === 'number' ? lastUsage.output : undefined,
-        cacheRead: typeof lastUsage.cacheRead === 'number' ? lastUsage.cacheRead : undefined,
-        cacheWrite: typeof lastUsage.cacheWrite === 'number' ? lastUsage.cacheWrite : undefined,
-        totalTokens: typeof lastUsage.total === 'number' ? lastUsage.total : undefined,
-        contextTokens: undefined, // lastUsage doesn't have contextTokens
-        model: typeof lastUsage.model === 'string' ? lastUsage.model : undefined,
-      };
-    } catch {
-      return undefined;
-    }
-  }
-
-  /** Record session statistics for this turn.
-   * @param allowStoreFallback 是否允许从 session store 读取 token 数据作为 fallback。中止时应为 false，避免写入上一轮的过期数据。
+   * Get last known metrics (synchronous, for terminal state recording).
    */
   private recordSessionStats(allowStoreFallback = true): void {
     try {
@@ -313,22 +278,6 @@ export class StreamingCardController {
       outputs.push(output);
     }
     return outputs;
-  }
-
-  /**
-   * Estimate token metrics during streaming.
-   * Since lastUsage is only updated after the turn completes, we estimate
-   * output tokens from the accumulated text length during streaming.
-   */
-  private getStreamingEstimateMetrics(): FooterSessionMetrics {
-    const totalChars = (this.text.completedText?.length || 0)
-      + (this.text.accumulatedText?.length || 0)
-      + (this.reasoning.accumulatedReasoningText?.length || 0);
-    // Rough estimate: ~1.5 chars per token for Chinese/mixed content
-    const estimatedOutputTokens = Math.round(totalChars / 1.5);
-    return {
-      outputTokens: estimatedOutputTokens > 0 ? estimatedOutputTokens : undefined,
-    };
   }
 
   private async getFooterSessionMetrics(): Promise<FooterSessionMetrics | undefined> {
@@ -1178,6 +1127,7 @@ export class StreamingCardController {
               registerPauseTarget(result.messageId, {
                 abortController: this.deps.abortController,
                 cardMessageId: result.messageId,
+                onAbort: () => this.abortCard(),
               });
             }
 
@@ -1229,6 +1179,7 @@ export class StreamingCardController {
             registerPauseTarget(result.messageId, {
               abortController: this.deps.abortController,
               cardMessageId: result.messageId,
+              onAbort: () => this.abortCard(),
             });
           }
         }
