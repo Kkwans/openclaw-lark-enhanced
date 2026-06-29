@@ -285,8 +285,8 @@ export class StreamingCardController {
       const runtime = LarkClient.runtime as Record<string, unknown> | null;
       if (!runtime) return undefined;
 
-      // Helper: read contextTokens + model from session store (fallback)
-      const readSessionStoreFallback = (): { contextTokens?: number; model?: string } => {
+      // Helper: read contextTokens + model + cache from session store (fallback)
+      const readSessionStoreFallback = (): { contextTokens?: number; model?: string; cacheRead?: number; cacheWrite?: number } => {
         try {
           const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
           const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
@@ -311,6 +311,8 @@ export class StreamingCardController {
                 return {
                   contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
                   model: typeof entry.model === 'string' ? entry.model : undefined,
+                  cacheRead: typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined,
+                  cacheWrite: typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined,
                 };
               }
             }
@@ -335,17 +337,18 @@ export class StreamingCardController {
         const model = typeof lastUsage.model === 'string' ? lastUsage.model : undefined;
 
         if (inputTokens != null || outputTokens != null) {
-          // lastUsage has token data but may lack contextTokens (OpenClaw doesn't include it)
+          // lastUsage has token data but may lack contextTokens and cache stats
+          // (OpenClaw doesn't include contextTokens in lastUsage; cache stats may
+          // be 0 or missing when the turn is aborted mid-reasoning)
           // Supplement from session store if needed
-          let resolvedContextTokens = contextTokens;
-          let resolvedModel = model;
-          if (resolvedContextTokens == null || resolvedModel == null) {
-            const fallback = readSessionStoreFallback();
-            if (resolvedContextTokens == null) resolvedContextTokens = fallback.contextTokens;
-            if (resolvedModel == null) resolvedModel = fallback.model;
-          }
-          log.debug('footer metrics: using lastUsage (current turn)', { inputTokens, outputTokens, cacheRead, cacheWrite, contextTokens: resolvedContextTokens });
-          return { inputTokens, outputTokens, cacheRead, cacheWrite, totalTokens, contextTokens: resolvedContextTokens, model: resolvedModel };
+          const fallback = readSessionStoreFallback();
+          const resolvedContextTokens = contextTokens ?? fallback.contextTokens;
+          const resolvedModel = model ?? fallback.model;
+          // Supplement cache stats: use session store values when lastUsage has 0 or undefined
+          const resolvedCacheRead = (cacheRead != null && cacheRead > 0) ? cacheRead : (fallback.cacheRead ?? cacheRead);
+          const resolvedCacheWrite = (cacheWrite != null && cacheWrite > 0) ? cacheWrite : (fallback.cacheWrite ?? cacheWrite);
+          log.debug('footer metrics: using lastUsage (current turn)', { inputTokens, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, contextTokens: resolvedContextTokens });
+          return { inputTokens, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, totalTokens, contextTokens: resolvedContextTokens, model: resolvedModel };
         }
       }
 
@@ -974,6 +977,10 @@ export class StreamingCardController {
     try {
       this.abortRequested = true;
       this.captureToolUseElapsed();
+      // Update reasoning elapsed time to reflect actual duration at abort point
+      if (this.reasoning.isReasoningPhase && this.reasoning.reasoningStartTime) {
+        this.reasoning.reasoningElapsedMs = Date.now() - this.reasoning.reasoningStartTime;
+      }
       if (!this.transition('aborted', 'abortCard', 'abort')) return;
 
       // transition() already executed onEnterTerminalPhase (cancel + complete + dispose hook)

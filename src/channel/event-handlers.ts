@@ -440,6 +440,12 @@ function handlePauseAction(data: unknown): unknown | undefined {
         elog.warn('streaming pause: onAbort failed', { error: String(err) });
       });
       elog.info('streaming pause triggered', { messageId: msgId });
+      return {
+        toast: {
+          type: 'info',
+          content: '已停止生成',
+        },
+      };
     } else {
       elog.warn('streaming pause: no target found for message', { messageId: msgId });
     }
