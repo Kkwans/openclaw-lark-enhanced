@@ -240,7 +240,8 @@ export class StreamingCardController {
 
       // Fallback: 从 session store 读取当前 run 的 token 数据
       if (!allowStoreFallback) {
-        log.warn('recordSessionStats: no lastUsage data, skipping store fallback (abort context)');
+        log.warn('recordSessionStats: no lastUsage data, incrementing turn count only (abort context)');
+        incrementSessionStats(statsKey, {});
         return;
       }
       const storeTokens = this.readSessionStoreTokens();
