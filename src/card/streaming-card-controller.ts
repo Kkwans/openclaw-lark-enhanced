@@ -348,8 +348,12 @@ export class StreamingCardController {
           // Supplement cache stats: use session store values when lastUsage has 0 or undefined
           const resolvedCacheRead = (cacheRead != null && cacheRead > 0) ? cacheRead : (fallback.cacheRead ?? cacheRead);
           const resolvedCacheWrite = (cacheWrite != null && cacheWrite > 0) ? cacheWrite : (fallback.cacheWrite ?? cacheWrite);
-          log.debug('footer metrics: using lastUsage (current turn)', { inputTokens, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, contextTokens: resolvedContextTokens });
-          return { inputTokens, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, totalTokens, contextTokens: resolvedContextTokens, model: resolvedModel };
+          // Compute totalTokens from input+output when not available (streaming phase)
+          const resolvedTotalTokens = totalTokens ?? (
+            (inputTokens != null || outputTokens != null) ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined
+          );
+          log.debug('footer metrics: using lastUsage (current turn)', { inputTokens, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, contextTokens: resolvedContextTokens, totalTokens: resolvedTotalTokens });
+          return { inputTokens, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, totalTokens: resolvedTotalTokens, contextTokens: resolvedContextTokens, model: resolvedModel };
         }
       }
 
@@ -383,12 +387,19 @@ export class StreamingCardController {
         if (entry) {
           // session store 中的 inputTokens/outputTokens 是当前 run 的 token 使用量（由 persistSessionUsageUpdate 写入）
           // 不是累计值，可以作为 footer 和 stats 的数据源
+          const inputTokens = typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined;
+          const outputTokens = typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined;
+          const totalTokensRaw = typeof entry.totalTokens === 'number' ? entry.totalTokens : undefined;
+          // Compute totalTokens from input+output when runtime hasn't written it yet (streaming phase)
+          const totalTokens = totalTokensRaw ?? (
+            (inputTokens != null || outputTokens != null) ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined
+          );
           return {
-            inputTokens: typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined,
-            outputTokens: typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined,
+            inputTokens,
+            outputTokens,
             cacheRead: typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined,
             cacheWrite: typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined,
-            totalTokens: typeof entry.totalTokens === 'number' ? entry.totalTokens : undefined,
+            totalTokens,
             contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
             model: typeof entry.model === 'string' ? entry.model : undefined,
           };
