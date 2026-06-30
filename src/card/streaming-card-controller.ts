@@ -753,6 +753,8 @@ export class StreamingCardController {
     if (this.reasoning.isReasoningPhase && this.reasoning.accumulatedReasoningText) {
       // Save completed reasoning round (deduplicate: skip if already pushed)
       const elapsed = this.reasoning.reasoningStartTime ? Date.now() - this.reasoning.reasoningStartTime : 0;
+      // 同步更新 reasoningElapsedMs，确保终态卡片显示正确的思考耗时
+      this.reasoning.reasoningElapsedMs = elapsed;
       const lastReasoning = this.completedReasonings[this.completedReasonings.length - 1];
       if (!lastReasoning || lastReasoning.text !== this.reasoning.accumulatedReasoningText) {
         this.completedReasonings.push({ text: this.reasoning.accumulatedReasoningText, elapsedMs: elapsed });
@@ -768,12 +770,6 @@ export class StreamingCardController {
 
     // 累积 deliver 文本用于最终卡片
     this.text.completedText += (this.text.completedText ? '\n\n' : '') + answerText;
-
-    // 清除流式状态，防止 onPartialReply 的回复边界检测误触发
-    // 当 onDeliver 交付一段完整回复后，onPartialReply 收到的下一段文本
-    // 可能比上一段短（正常的流式输出），此时 lastPartialText 残留会导致
-    // 边界检测误判为"新回复开始"，将上一段文本重复追加到 streamingPrefix
-    this.text.lastPartialText = '';
 
     // 没有流式数据时，用 deliver 文本显示在卡片上
     if (!this.text.lastPartialText && !this.text.streamingPrefix) {
@@ -861,14 +857,17 @@ export class StreamingCardController {
       this.reasoning.reasoningElapsedMs = this.reasoning.reasoningStartTime
         ? Date.now() - this.reasoning.reasoningStartTime
         : 0;
-      // Save completed reasoning round
+      // Save completed reasoning round (deduplicate: skip if already pushed)
       if (this.reasoning.accumulatedReasoningText) {
-        this.completedReasonings.push({
-          text: this.reasoning.accumulatedReasoningText,
-          elapsedMs: this.reasoning.reasoningElapsedMs,
-        });
-        // Save the accumulated text at this reasoning boundary
-        this.outputAtReasoningBoundary.push(this.textBeforeReasoning || '');
+        const lastReasoning = this.completedReasonings[this.completedReasonings.length - 1];
+        if (!lastReasoning || lastReasoning.text !== this.reasoning.accumulatedReasoningText) {
+          this.completedReasonings.push({
+            text: this.reasoning.accumulatedReasoningText,
+            elapsedMs: this.reasoning.reasoningElapsedMs,
+          });
+          // Save the accumulated text at this reasoning boundary
+          this.outputAtReasoningBoundary.push(this.textBeforeReasoning || '');
+        }
       }
       // Restore text that was accumulated before reasoning started.
       // Without this, the first output chunk (delivered before thinking)
@@ -884,7 +883,9 @@ export class StreamingCardController {
     }
 
     // 检测回复边界：文本长度缩短 → 新回复开始
-    if (this.text.lastPartialText && text.length < this.text.lastPartialText.length) {
+    // 当 deliverJustSetPrefix 为 true 时跳过，因为 onDeliver 刚设置了 prefix，
+    // onPartialReply 收到的是同一段文本，不应触发边界检测
+    if (!this.deliverJustSetPrefix && this.text.lastPartialText && text.length < this.text.lastPartialText.length) {
       this.text.streamingPrefix += (this.text.streamingPrefix ? '\n\n' : '') + this.text.lastPartialText;
     }
     this.text.lastPartialText = text;
