@@ -255,6 +255,11 @@ export class StreamingCardController {
       }
       const storeTokens = this.readSessionStoreTokens();
       if (storeTokens && (storeTokens.input || storeTokens.output)) {
+        // 使用 transcript 累加的缓存数据修正 session store 的单次调用值
+        if (this.transcriptCacheUsage) {
+          if (this.transcriptCacheUsage.cacheRead != null) storeTokens.cacheRead = this.transcriptCacheUsage.cacheRead;
+          if (this.transcriptCacheUsage.cacheWrite != null) storeTokens.cacheWrite = this.transcriptCacheUsage.cacheWrite;
+        }
         log.info('recordSessionStats: using session store tokens', storeTokens);
         incrementSessionStats(statsKey, storeTokens);
         return;
@@ -490,6 +495,8 @@ export class StreamingCardController {
               const transcriptCache = await this.accumulateTranscriptCacheUsage(sessionFile);
               if (transcriptCache.cacheRead != null) resolvedCacheRead = transcriptCache.cacheRead;
               if (transcriptCache.cacheWrite != null) resolvedCacheWrite = transcriptCache.cacheWrite;
+              // 同步设置 transcriptCacheUsage，确保 recordSessionStats 也能使用修正后的值
+              this.transcriptCacheUsage = transcriptCache;
               log.debug('footer metrics: transcript cache corrected', { storeCacheRead: entry.cacheRead, transcriptCacheRead: resolvedCacheRead });
             } catch { /* fallback to session store values */ }
           }
