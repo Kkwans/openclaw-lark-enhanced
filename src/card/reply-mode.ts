@@ -71,26 +71,17 @@ export function expandAutoMode(params: {
 // ---------------------------------------------------------------------------
 
 /**
- * Detect whether the text contains markdown elements that benefit from
- * being rendered inside a Feishu interactive card (fenced code blocks or
- * markdown tables).
+ * scope A: rich text now renders natively as post(`tag:md`); we never force a
+ * card for code blocks OR tables anymore. Native rendering also keeps bot-at-bot
+ * @ delivery working — wrapping a reply in a card breaks it (cards have limited
+ * @ support). The only remaining card-path guard is the table-count hard limit,
+ * retained for the runtime fallback in reply-dispatcher (card rejected by
+ * Feishu → plain text).
  */
 export function shouldUseCard(text: string): boolean {
-  // Markdown tables NO LONGER force a card. Feishu messages render markdown
-  // tables natively, and wrapping a reply in a card breaks bot-at-bot @
-  // delivery (cards have limited @ support). Only fenced code blocks still
-  // benefit from card rendering.
-  //
-  // The table-count guard is kept as a safety valve: when a reply also
-  // contains an excessive number of markdown tables, skip the card entirely
-  // rather than risk a card-render failure.
   const tableMatches = findMarkdownTablesOutsideCodeBlocks(text);
   if (tableMatches.length > FEISHU_CARD_TABLE_LIMIT) {
     return false;
-  }
-  // Fenced code blocks
-  if (/```[\s\S]*?```/.test(text)) {
-    return true;
   }
   return false;
 }
