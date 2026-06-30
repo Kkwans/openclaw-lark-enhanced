@@ -11,6 +11,8 @@
  * detection to UnavailableGuard.
  */
 
+import { createReadStream } from 'node:fs';
+import { createInterface } from 'node:readline';
 import { resolveDefaultAgentId } from 'openclaw/plugin-sdk/agent-runtime';
 import type { ReplyPayload } from 'openclaw/plugin-sdk';
 import { SILENT_REPLY_TOKEN } from 'openclaw/plugin-sdk/reply-runtime';
@@ -134,6 +136,8 @@ export class StreamingCardController {
   private abortRequested = false;
   /** Set when onDeliver just populated streamingPrefix, to prevent onPartialReply from duplicating. */
   private deliverJustSetPrefix = false;
+  /** Cached transcript cache usage (accumulated across all LLM calls in the turn). */
+  private transcriptCacheUsage: { cacheRead?: number; cacheWrite?: number } | null = null;
   private cardCreationPromise: Promise<void> | null = null;
   private disposeShutdownHook: (() => void) | null = null;
   // sessionId-based key for session stats (resolved at runtime)
@@ -229,8 +233,13 @@ export class StreamingCardController {
         // OpenClaw runtime lastUsage fields: input, output, cacheRead, cacheWrite, total
         const input = typeof lastUsage.input === 'number' ? lastUsage.input : undefined;
         const output = typeof lastUsage.output === 'number' ? lastUsage.output : undefined;
-        const cacheRead = typeof lastUsage.cacheRead === 'number' ? lastUsage.cacheRead : undefined;
-        const cacheWrite = typeof lastUsage.cacheWrite === 'number' ? lastUsage.cacheWrite : undefined;
+        let cacheRead = typeof lastUsage.cacheRead === 'number' ? lastUsage.cacheRead : undefined;
+        let cacheWrite = typeof lastUsage.cacheWrite === 'number' ? lastUsage.cacheWrite : undefined;
+        // 使用 transcript 累加的缓存数据修正 lastUsage 的单次调用值
+        if (this.transcriptCacheUsage) {
+          if (this.transcriptCacheUsage.cacheRead != null) cacheRead = this.transcriptCacheUsage.cacheRead;
+          if (this.transcriptCacheUsage.cacheWrite != null) cacheWrite = this.transcriptCacheUsage.cacheWrite;
+        }
         if (input != null || output != null || cacheRead != null || cacheWrite != null) {
           log.info('recordSessionStats: lastUsage found', { input, output, cacheRead, cacheWrite });
           incrementSessionStats(statsKey, { input, output, cacheRead, cacheWrite });
@@ -279,6 +288,51 @@ export class StreamingCardController {
       outputs.push(output);
     }
     return outputs;
+  }
+
+  /**
+   * Read the session transcript file and accumulate cacheRead/cacheWrite from
+   * all assistant messages. This corrects the runtime bug where the session
+   * store only has the last LLM call's cache values instead of the accumulated
+   * total for the entire turn.
+   */
+  private async accumulateTranscriptCacheUsage(sessionFile: string): Promise<{ cacheRead?: number; cacheWrite?: number }> {
+    try {
+      let totalCacheRead = 0;
+      let totalCacheWrite = 0;
+      let found = false;
+
+      const rl = createInterface({
+        input: createReadStream(sessionFile, { encoding: 'utf-8' }),
+        crlfDelay: Infinity,
+      });
+
+      for await (const line of rl) {
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line);
+          const msg = parsed?.message;
+          if (msg?.role === 'assistant' && msg.usage) {
+            const u = msg.usage;
+            const cr = typeof u.cacheRead === 'number' ? u.cacheRead : 0;
+            const cw = typeof u.cacheWrite === 'number' ? u.cacheWrite : 0;
+            if (cr > 0 || cw > 0) {
+              totalCacheRead += cr;
+              totalCacheWrite += cw;
+              found = true;
+            }
+          }
+        } catch { /* skip malformed lines */ }
+      }
+
+      if (!found) return {};
+      return {
+        cacheRead: totalCacheRead > 0 ? totalCacheRead : undefined,
+        cacheWrite: totalCacheWrite > 0 ? totalCacheWrite : undefined,
+      };
+    } catch {
+      return {};
+    }
   }
 
   private async getFooterSessionMetrics(): Promise<FooterSessionMetrics | undefined> {
@@ -346,8 +400,39 @@ export class StreamingCardController {
           const resolvedContextTokens = contextTokens ?? fallback.contextTokens;
           const resolvedModel = model ?? fallback.model;
           // Supplement cache stats: use session store values when lastUsage has 0 or undefined
-          const resolvedCacheRead = (cacheRead != null && cacheRead > 0) ? cacheRead : (fallback.cacheRead ?? cacheRead);
-          const resolvedCacheWrite = (cacheWrite != null && cacheWrite > 0) ? cacheWrite : (fallback.cacheWrite ?? cacheWrite);
+          let resolvedCacheRead = (cacheRead != null && cacheRead > 0) ? cacheRead : (fallback.cacheRead ?? cacheRead);
+          let resolvedCacheWrite = (cacheWrite != null && cacheWrite > 0) ? cacheWrite : (fallback.cacheWrite ?? cacheWrite);
+          // 修正缓存命中率：读取 transcript 文件累加所有 LLM 调用的 cache 数据
+          try {
+            const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
+            const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
+            const key = this.deps.sessionKey.trim().toLowerCase();
+            const defaultAgentId = resolveDefaultAgentId(this.deps.cfg as Record<string, unknown>) || 'main';
+            const fallbackKey = key.replace(/^(agent):[^:]+:/, `$1:${defaultAgentId}:`);
+            const candidateKeys = fallbackKey !== key ? [key, fallbackKey] : [key];
+            const agentAny = (runtime as Record<string, unknown>).agent as Record<string, unknown> | undefined;
+            const sessionApi = agentAny?.session as Record<string, unknown> | undefined;
+            const resolveStorePath = sessionApi?.resolveStorePath as ((storePath?: string, opts?: { agentId?: string }) => string) | undefined;
+            const loadSessionStore = sessionApi?.loadSessionStore as ((storePath: string) => Record<string, Record<string, unknown>>) | undefined;
+            if (resolveStorePath && loadSessionStore) {
+              const storePath = resolveStorePath(sessionStorePath, { agentId: this.deps.agentId });
+              const store = loadSessionStore(storePath);
+              for (const candidate of candidateKeys) {
+                const val = store[candidate];
+                if (val && typeof val === 'object') {
+                  const entry = val as Record<string, unknown>;
+                  const sessionFile = typeof entry.sessionFile === 'string' ? entry.sessionFile : undefined;
+                  if (sessionFile) {
+                    const transcriptCache = await this.accumulateTranscriptCacheUsage(sessionFile);
+                    if (transcriptCache.cacheRead != null) resolvedCacheRead = transcriptCache.cacheRead;
+                    if (transcriptCache.cacheWrite != null) resolvedCacheWrite = transcriptCache.cacheWrite;
+                    this.transcriptCacheUsage = transcriptCache;
+                  }
+                  break;
+                }
+              }
+            }
+          } catch { /* fallback to lastUsage values */ }
           // Compute totalTokens from input+output when not available (streaming phase)
           const resolvedTotalTokens = totalTokens ?? (
             (inputTokens != null || outputTokens != null) ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined
@@ -394,11 +479,26 @@ export class StreamingCardController {
           const totalTokens = totalTokensRaw ?? (
             (inputTokens != null || outputTokens != null) ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined
           );
+
+          // 修正缓存命中率：session store 的 cacheRead/cacheWrite 只有最后一次 LLM 调用的值
+          // 读取 transcript 文件累加所有 LLM 调用的 cache 数据，得到整轮对话的正确值
+          let resolvedCacheRead = typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined;
+          let resolvedCacheWrite = typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined;
+          const sessionFile = typeof entry.sessionFile === 'string' ? entry.sessionFile : undefined;
+          if (sessionFile) {
+            try {
+              const transcriptCache = await this.accumulateTranscriptCacheUsage(sessionFile);
+              if (transcriptCache.cacheRead != null) resolvedCacheRead = transcriptCache.cacheRead;
+              if (transcriptCache.cacheWrite != null) resolvedCacheWrite = transcriptCache.cacheWrite;
+              log.debug('footer metrics: transcript cache corrected', { storeCacheRead: entry.cacheRead, transcriptCacheRead: resolvedCacheRead });
+            } catch { /* fallback to session store values */ }
+          }
+
           return {
             inputTokens,
             outputTokens,
-            cacheRead: typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined,
-            cacheWrite: typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined,
+            cacheRead: resolvedCacheRead,
+            cacheWrite: resolvedCacheWrite,
             totalTokens,
             contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
             model: typeof entry.model === 'string' ? entry.model : undefined,
@@ -661,6 +761,12 @@ export class StreamingCardController {
 
     // 累积 deliver 文本用于最终卡片
     this.text.completedText += (this.text.completedText ? '\n\n' : '') + answerText;
+
+    // 清除流式状态，防止 onPartialReply 的回复边界检测误触发
+    // 当 onDeliver 交付一段完整回复后，onPartialReply 收到的下一段文本
+    // 可能比上一段短（正常的流式输出），此时 lastPartialText 残留会导致
+    // 边界检测误判为"新回复开始"，将上一段文本重复追加到 streamingPrefix
+    this.text.lastPartialText = '';
 
     // 没有流式数据时，用 deliver 文本显示在卡片上
     if (!this.text.lastPartialText && !this.text.streamingPrefix) {
