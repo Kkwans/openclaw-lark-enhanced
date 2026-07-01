@@ -238,6 +238,12 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
               await controller.onReasoningStream({ ...payload, text: controllerText });
               return;
             }
+            // 跳过 block delivery：SDK 对同一段文本先发 block 再发 final，
+            // onDeliver 只应在 final 时执行，避免 completedText 累积重复
+            if (meta?.kind === 'block') {
+              log.debug('deliver: skipping block delivery (handled by onPartialReply)');
+              return;
+            }
             await controller.onDeliver({ ...payload, text: controllerText });
             return;
           }

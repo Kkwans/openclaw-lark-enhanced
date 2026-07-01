@@ -893,12 +893,9 @@ export class StreamingCardController {
       this.reasoning.reasoningStartTime = null;
     }
 
-    // 检测回复边界：文本长度缩短 → 新回复开始
-    // 当 deliverJustSetPrefix 为 true 时跳过，因为 onDeliver 刚设置了 prefix，
-    // onPartialReply 收到的是同一段文本，不应触发边界检测
-    if (!this.deliverJustSetPrefix && this.text.lastPartialText && text.length < this.text.lastPartialText.length) {
-      this.text.streamingPrefix += (this.text.streamingPrefix ? '\n\n' : '') + this.text.lastPartialText;
-    }
+    // 注意：已移除“回复边界检测”逻辑（text.length < lastPartialText.length → streamingPrefix += lastPartialText）
+    // 原因：OpenClaw runtime 传入累积文本（非 delta），流式输出中长度波动是正常现象（LLM re-sampling），
+    // 边界检测会误触发导致整段文本重复。streamingPrefix 的恢复由 reasoning 结束时的独立逻辑处理。
     this.text.lastPartialText = text;
     // 防止 onDeliver 设置的 streamingPrefix 与 onPartialReply 的 text 重复拼接
     // 当 onDeliver 先处理了初始文本并设置 streamingPrefix，onPartialReply 收到相同文本时不应重复拼接
