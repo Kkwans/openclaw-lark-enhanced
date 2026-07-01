@@ -122,6 +122,8 @@ export class StreamingCardController {
     elapsedMs: 0,
     isActive: false,
   };
+  /** 累计工具调用耗时（用于从 reasoningElapsedMs 中扣除） */
+  private totalToolUseElapsedMs = 0;
   // ---- Sub-controllers ----
   private readonly flush: FlushController;
   private readonly guard: UnavailableGuard;
@@ -568,6 +570,37 @@ export class StreamingCardController {
       },
       deps.sessionKey,
     );
+
+    // 设置默认模型名：当 session store 中没有 model 时作为兜底
+    try {
+      const runtime = LarkClient.runtime;
+      if (runtime) {
+        const sessionApi = runtime.agent?.session;
+        const cfgWithSession = deps.cfg as Record<string, unknown>;
+        const sessionStorePath = (cfgWithSession.sessions as Record<string, unknown>)?.store as string | undefined
+          ?? (cfgWithSession.session as Record<string, unknown>)?.store as string | undefined;
+        const resolveStorePath = sessionApi?.resolveStorePath;
+        const loadSessionStore = sessionApi?.loadSessionStore;
+        if (resolveStorePath && loadSessionStore) {
+          const store = loadSessionStore(resolveStorePath(sessionStorePath, { agentId: deps.agentId }));
+          const key = deps.sessionKey.trim().toLowerCase();
+          const defaultAgentId = resolveDefaultAgentId(deps.cfg) || 'main';
+          const fallbackKey = key.replace(/^(agent):[^:]+:/, `$1:${defaultAgentId}:`);
+          const candidateKeys = fallbackKey !== key ? [key, fallbackKey] : [key];
+          for (const candidate of candidateKeys) {
+            const entry = store[candidate] as Record<string, unknown> | undefined;
+            if (entry && typeof entry === 'object') {
+              const report = entry.systemPromptReport as Record<string, unknown> | undefined;
+              const model = report?.model as string | undefined ?? entry.model as string | undefined;
+              if (model) {
+                this.streamingFooter.setDefaultModel(model);
+                break;
+              }
+            }
+          }
+        }
+      }
+    } catch { /* ignore */ }
   }
 
   // ------------------------------------------------------------------
@@ -715,7 +748,11 @@ export class StreamingCardController {
 
   private captureToolUseElapsed(): void {
     if (!this.toolUse.startedAt) return;
-    this.toolUse.elapsedMs = Date.now() - this.toolUse.startedAt;
+    const elapsed = Date.now() - this.toolUse.startedAt;
+    if (this.toolUse.isActive) {
+      this.totalToolUseElapsedMs += elapsed;
+    }
+    this.toolUse.elapsedMs = elapsed;
     this.toolUse.isActive = false;
   }
 
@@ -753,7 +790,7 @@ export class StreamingCardController {
       if (!this.reasoning.reasoningStartTime) {
         this.reasoning.reasoningStartTime = Date.now();
       }
-      this.reasoning.reasoningElapsedMs = Date.now() - this.reasoning.reasoningStartTime;
+      this.reasoning.reasoningElapsedMs = Date.now() - this.reasoning.reasoningStartTime - this.totalToolUseElapsedMs;
       this.reasoning.accumulatedReasoningText = split.reasoningText;
       this.reasoning.isReasoningPhase = true;
       await this.throttledCardUpdate();
@@ -763,7 +800,7 @@ export class StreamingCardController {
     // Answer payload (may also contain inline reasoning from tags)
     if (this.reasoning.isReasoningPhase && this.reasoning.accumulatedReasoningText) {
       // Save completed reasoning round (deduplicate: skip if already pushed)
-      const elapsed = this.reasoning.reasoningStartTime ? Date.now() - this.reasoning.reasoningStartTime : 0;
+      const elapsed = this.reasoning.reasoningStartTime ? Date.now() - this.reasoning.reasoningStartTime - this.totalToolUseElapsedMs : 0;
       // 同步更新 reasoningElapsedMs，确保终态卡片显示正确的思考耗时
       this.reasoning.reasoningElapsedMs = elapsed;
       const lastReasoning = this.completedReasonings[this.completedReasonings.length - 1];
@@ -777,12 +814,18 @@ export class StreamingCardController {
     this.reasoning.isReasoningPhase = false;
     this.reasoning.accumulatedReasoningText = '';
     this.reasoning.reasoningStartTime = null;
+    this.totalToolUseElapsedMs = 0;
     const answerText = split.answerText ?? text;
 
     // 累积 deliver 文本用于最终卡片
-    this.text.completedText += (this.text.completedText ? '\n\n' : '') + answerText;
+    // 当 onPartialReply 已处理过文本时（lastPartialText 非空），跳过 completedText 更新
+    // 避免 onDeliver 和 onPartialReply 同时累积导致文本重复
+    if (!this.text.lastPartialText) {
+      this.text.completedText += (this.text.completedText ? '\n\n' : '') + answerText;
+    }
 
     // 没有流式数据时，用 deliver 文本显示在卡片上
+    // 当 streamingPrefix 已存在时（之前的 segment 已设置），保留现有 prefix
     if (!this.text.lastPartialText && !this.text.streamingPrefix) {
       this.text.accumulatedText += (this.text.accumulatedText ? '\n\n' : '') + answerText;
       this.text.streamingPrefix = this.text.accumulatedText;
@@ -866,7 +909,7 @@ export class StreamingCardController {
     if (this.reasoning.isReasoningPhase) {
       this.reasoning.isReasoningPhase = false;
       this.reasoning.reasoningElapsedMs = this.reasoning.reasoningStartTime
-        ? Date.now() - this.reasoning.reasoningStartTime
+        ? Date.now() - this.reasoning.reasoningStartTime - this.totalToolUseElapsedMs
         : 0;
       // Save completed reasoning round (deduplicate: skip if already pushed)
       if (this.reasoning.accumulatedReasoningText) {
@@ -891,6 +934,7 @@ export class StreamingCardController {
       this.textBeforeReasoning = '';
       this.reasoning.accumulatedReasoningText = '';
       this.reasoning.reasoningStartTime = null;
+      this.totalToolUseElapsedMs = 0;
     }
 
     // 注意：已移除“回复边界检测”逻辑（text.length < lastPartialText.length → streamingPrefix += lastPartialText）
@@ -1113,7 +1157,7 @@ export class StreamingCardController {
       this.captureToolUseElapsed();
       // Update reasoning elapsed time to reflect actual duration at abort point
       if (this.reasoning.isReasoningPhase && this.reasoning.reasoningStartTime) {
-        this.reasoning.reasoningElapsedMs = Date.now() - this.reasoning.reasoningStartTime;
+        this.reasoning.reasoningElapsedMs = Date.now() - this.reasoning.reasoningStartTime - this.totalToolUseElapsedMs;
       }
       if (!this.transition('aborted', 'abortCard', 'abort')) return;
 

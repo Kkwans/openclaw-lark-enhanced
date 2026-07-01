@@ -152,9 +152,16 @@ export class StreamingFooter {
   private config: StreamingFooterConfig;
   private sessionKey: string;
 
+  private defaultModel?: string;
+
   constructor(config: StreamingFooterConfig, sessionKey: string) {
     this.config = config;
     this.sessionKey = sessionKey;
+  }
+
+  /** Set a fallback model name used when metrics don't include model info. */
+  setDefaultModel(model: string): void {
+    this.defaultModel = model;
   }
 
   /** Update the session key (e.g. when sessionId is resolved at runtime). */
@@ -234,7 +241,7 @@ export class StreamingFooter {
         // maxCtx: 优先 session store，fallback 到本地模型上下文容量
         let maxCtx = metrics?.contextTokens ?? 0;
         if (maxCtx <= 0) {
-          maxCtx = resolveModelContextWindow(metrics?.model) ?? 0;
+          maxCtx = resolveModelContextWindow(metrics?.model ?? this.defaultModel) ?? 0;
         }
         if (used > 0 || maxCtx > 0) {
           if (used > 0 && maxCtx > 0) {
@@ -270,8 +277,9 @@ export class StreamingFooter {
       const elapsed = Date.now() - this.state.startTime;
       primaryParts.push(`⏱️ ${formatElapsed(elapsed)}`);
     }
-    if (config.model && metrics?.model) {
-      primaryParts.push(`🤖 ${metrics.model}`);
+    const resolvedModel = metrics?.model ?? this.defaultModel;
+    if (config.model && resolvedModel) {
+      primaryParts.push(`🤖 ${resolvedModel}`);
     }
     // Streaming: append context to the same line
     if (!isTerminal && config.context) {
@@ -279,7 +287,7 @@ export class StreamingFooter {
       // maxCtx: 优先 session store，fallback 到本地模型上下文容量
       let maxCtx = metrics?.contextTokens ?? 0;
       if (maxCtx <= 0) {
-        maxCtx = resolveModelContextWindow(metrics?.model) ?? 0;
+        maxCtx = resolveModelContextWindow(resolvedModel) ?? 0;
       }
       if (used > 0 || maxCtx > 0) {
         if (used > 0 && maxCtx > 0) {
