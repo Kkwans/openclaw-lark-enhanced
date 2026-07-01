@@ -179,7 +179,8 @@ export class StreamingFooter {
       const session = getSessionStats(this.sessionKey);
       const daily = getDailyStats();
       const monthly = getMonthlyStats();
-      const totalTokens = (t: { inputTokens: number; outputTokens: number }) => t.inputTokens + t.outputTokens;
+      // 总 token = input + output + cacheRead（与官方统计对齐）
+      const totalTokens = (t: { inputTokens: number; outputTokens: number; cacheRead: number }) => t.inputTokens + t.outputTokens + t.cacheRead;
       const cacheRate = (t: { cacheRead: number; cacheWrite: number; inputTokens: number }) =>
         formatCacheRate(t.cacheRead, t.cacheWrite, t.inputTokens);
 
@@ -202,7 +203,8 @@ export class StreamingFooter {
       // Terminal: detail line with tokens + cache + context
       if (config.tokens) {
         if (metrics) {
-          const input = metrics.inputTokens ?? 0;
+          // 输入 = inputTokens + cacheRead（与官方统计对齐，prompt_tokens 包含缓存命中）
+          const input = (metrics.inputTokens ?? 0) + (metrics.cacheRead ?? 0);
           const output = metrics.outputTokens ?? 0;
           if (input > 0 || output > 0) {
             detailParts.push(`🪙 ${formatTokenCount(input)}+${formatTokenCount(output)}`);
