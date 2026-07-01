@@ -430,7 +430,7 @@ function buildStreamingCard(
   // Completed reasoning collapsible blocks + their paired outputs
   if (completedReasonings && completedReasonings.length > 0) {
     for (let i = 0; i < completedReasonings.length; i++) {
-      elements.push(buildCompletedReasoningPanel(completedReasonings[i]));
+      elements.push(buildCompletedReasoningPanel(completedReasonings[i], toolUseElapsedMs));
       if (completedOutputs && completedOutputs[i]) {
         elements.push({
           tag: 'markdown',
@@ -511,10 +511,20 @@ function buildStreamingCard(
 }
 
 /** Build a completed reasoning collapsible panel. */
-function buildCompletedReasoningPanel(reasoning: { text: string; elapsedMs: number }): CardElement {
+function buildCompletedReasoningPanel(
+  reasoning: { text: string; elapsedMs: number },
+  toolUseElapsedMs?: number,
+): CardElement {
   const dur = formatReasoningDuration(reasoning.elapsedMs);
-  const zhLabel = dur ? dur.zh : '思考';
-  const enLabel = dur ? dur.en : 'Thought';
+  const zhParts = [dur ? dur.zh : '思考'];
+  const enParts = [dur ? dur.en : 'Thought'];
+  if (toolUseElapsedMs && toolUseElapsedMs > 0) {
+    const toolDur = formatToolUseDuration(toolUseElapsedMs);
+    zhParts.push(toolDur.zh.replace('执行耗时 ', '🛠️执行 '));
+    enParts.push(toolDur.en.replace('Tool use for ', '🛠️ '));
+  }
+  const zhLabel = zhParts.join(' ');
+  const enLabel = enParts.join(' ');
   return {
     tag: 'collapsible_panel',
     expanded: false,
@@ -637,7 +647,7 @@ function buildCompleteCard(params: {
   // Completed reasoning collapsible blocks + their paired outputs
   if (completedReasonings && completedReasonings.length > 0) {
     for (let i = 0; i < completedReasonings.length; i++) {
-      elements.push(buildCompletedReasoningPanel(completedReasonings[i]));
+      elements.push(buildCompletedReasoningPanel(completedReasonings[i], toolUseElapsedMs));
       if (completedOutputs && completedOutputs[i]) {
         elements.push({
           tag: 'markdown',
@@ -652,7 +662,7 @@ function buildCompleteCard(params: {
     elements.push(buildCompletedReasoningPanel({
       text: reasoningText,
       elapsedMs: reasoningElapsedMs ?? 0,
-    }));
+    }, toolUseElapsedMs));
   }
 
   // Full text content (current output)
