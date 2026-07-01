@@ -825,11 +825,15 @@ export class StreamingCardController {
     }
 
     // 没有流式数据时，用 deliver 文本显示在卡片上
-    // 当 streamingPrefix 已存在时（之前的 segment 已设置），保留现有 prefix
     if (!this.text.lastPartialText && !this.text.streamingPrefix) {
+      // 首次 deliver：设置 prefix
       this.text.accumulatedText += (this.text.accumulatedText ? '\n\n' : '') + answerText;
       this.text.streamingPrefix = this.text.accumulatedText;
       this.deliverJustSetPrefix = true;
+      await this.throttledCardUpdate();
+    } else if (!this.text.lastPartialText && this.text.streamingPrefix) {
+      // 后续 deliver：保留现有 prefix，只拼接到 accumulatedText
+      this.text.accumulatedText = this.text.streamingPrefix + '\n\n' + answerText;
       await this.throttledCardUpdate();
     }
   }
