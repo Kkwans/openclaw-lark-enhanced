@@ -199,7 +199,7 @@ export class StreamingCardController {
   /**
    * Get last known metrics (synchronous, for terminal state recording).
    */
-  private recordSessionStats(allowStoreFallback = true): void {
+  private recordSessionStats(allowStoreFallback = true, footerMetrics?: FooterSessionMetrics): void {
     try {
       const runtime = LarkClient.runtime as Record<string, unknown> | null;
       if (!runtime) { incrementSessionStats(this.deps.sessionKey, {}); return; }
@@ -247,7 +247,18 @@ export class StreamingCardController {
         }
       }
 
-      // Fallback: 从 session store 读取当前 run 的 token 数据
+      // Fallback 1: 使用 footer 已经获取到的 metrics（abort 路径传入）
+      if (footerMetrics && (footerMetrics.inputTokens || footerMetrics.outputTokens)) {
+        const input = footerMetrics.inputTokens ?? 0;
+        const output = footerMetrics.outputTokens ?? 0;
+        const cacheRead = footerMetrics.cacheRead ?? 0;
+        const cacheWrite = footerMetrics.cacheWrite ?? 0;
+        log.info('recordSessionStats: using footer metrics (abort path)', { input, output, cacheRead, cacheWrite });
+        incrementSessionStats(statsKey, { input, output, cacheRead, cacheWrite });
+        return;
+      }
+
+      // Fallback 2: 从 session store 读取当前 run 的 token 数据
       if (!allowStoreFallback) {
         log.warn('recordSessionStats: no lastUsage data, incrementing turn count only (abort context)');
         incrementSessionStats(statsKey, {});
@@ -1126,8 +1137,8 @@ export class StreamingCardController {
         this.imageResolver,
       );
       const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
-      // 中止时只记录 lastUsage 中的当前轮数据，不从 session store 读取（那是上一轮的过期数据）
-      this.recordSessionStats(false);
+      // 中止时传入 footerMetrics，让 recordSessionStats 能使用已获取的 token 数据
+      this.recordSessionStats(false, footerMetrics);
       if (effectiveCardId) {
         const abortCardContent = buildCardContent('complete', {
           text: terminalContent.text,

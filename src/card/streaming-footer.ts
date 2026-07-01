@@ -11,6 +11,8 @@
  * - Support both CardKit streaming element updates and IM patch fallback
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { FooterSessionMetrics } from './reply-dispatcher-types';
 import { compactNumber, formatElapsed } from './builder';
 import { getSessionStats, getDailyStats, getMonthlyStats, incrementSessionStats } from './session-stats';
@@ -59,6 +61,60 @@ export interface StreamingFooterConfig {
   dailyStats?: boolean;
   /** Show monthly stats. */
   monthlyStats?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Model context window fallback
+// ---------------------------------------------------------------------------
+
+let _modelContextCache: Record<string, number> | null = null;
+
+/**
+ * Load model context window from the local JSON file.
+ * Cached after first read.
+ */
+function loadModelContextWindow(): Record<string, number> {
+  if (_modelContextCache) return _modelContextCache;
+  try {
+    // Try workspace path first, then fallback to common locations
+    const candidates = [
+      resolve(process.env.HOME ?? '/root', '.openclaw/workspace/models-context-window.json'),
+      '/root/.openclaw/workspace/models-context-window.json',
+    ];
+    for (const filePath of candidates) {
+      try {
+        const raw = readFileSync(filePath, 'utf-8');
+        const data = JSON.parse(raw);
+        const map: Record<string, number> = {};
+        if (data.models && typeof data.models === 'object') {
+          for (const [key, val] of Object.entries(data.models)) {
+            if (val && typeof val === 'object' && typeof (val as Record<string, unknown>).contextWindow === 'number') {
+              map[key] = (val as Record<string, unknown>).contextWindow as number;
+            }
+          }
+        }
+        _modelContextCache = map;
+        return map;
+      } catch { /* try next */ }
+    }
+  } catch { /* ignore */ }
+  _modelContextCache = {};
+  return {};
+}
+
+/**
+ * Resolve context window for a model.
+ * Tries exact match first, then prefix match (e.g. "mimo/mimo-v2.5-pro" matches "mimo/mimo-v2.5-pro").
+ */
+function resolveModelContextWindow(model?: string): number | undefined {
+  if (!model) return undefined;
+  const map = loadModelContextWindow();
+  // Exact match
+  if (map[model] != null) return map[model];
+  // Prefix match (e.g. "mimo/mimo-v2.5-pro:some-variant" matches "mimo/mimo-v2.5-pro")
+  const modelBase = model.split(':')[0];
+  if (map[modelBase] != null) return map[modelBase];
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -172,18 +228,20 @@ export class StreamingFooter {
         }
       }
       if (config.context) {
-        if (metrics) {
-          const used = metrics.totalTokens ?? 0;
-          const maxCtx = metrics.contextTokens ?? 0;
-          if (used > 0) {
-            if (maxCtx > 0) {
-              const pct = Math.round((used / maxCtx) * 100);
-              detailParts.push(`🧠 ${compactNumber(used)}/${compactNumber(maxCtx)} (${pct}%)`);
-            } else {
-              detailParts.push(`🧠 ${compactNumber(used)}`);
-            }
+        const used = metrics?.totalTokens ?? 0;
+        // maxCtx: 优先 session store，fallback 到本地模型上下文容量
+        let maxCtx = metrics?.contextTokens ?? 0;
+        if (maxCtx <= 0) {
+          maxCtx = resolveModelContextWindow(metrics?.model) ?? 0;
+        }
+        if (used > 0 || maxCtx > 0) {
+          if (used > 0 && maxCtx > 0) {
+            const pct = Math.round((used / maxCtx) * 100);
+            detailParts.push(`🧠 ${compactNumber(used)}/${compactNumber(maxCtx)} (${pct}%)`);
+          } else if (maxCtx > 0) {
+            detailParts.push(`🧠 ${compactNumber(maxCtx)}`);
           } else {
-            detailParts.push('🧠 -');
+            detailParts.push(`🧠 ${compactNumber(used)}`);
           }
         } else {
           detailParts.push('🧠 -');
@@ -215,18 +273,20 @@ export class StreamingFooter {
     }
     // Streaming: append context to the same line
     if (!isTerminal && config.context) {
-      if (metrics) {
-        const used = metrics.totalTokens ?? 0;
-        const maxCtx = metrics.contextTokens ?? 0;
-        if (used > 0) {
-          if (maxCtx > 0) {
-            const pct = Math.round((used / maxCtx) * 100);
-            primaryParts.push(`🧠 ${compactNumber(used)}/${compactNumber(maxCtx)} (${pct}%)`);
-          } else {
-            primaryParts.push(`🧠 ${compactNumber(used)}`);
-          }
+      const used = metrics?.totalTokens ?? 0;
+      // maxCtx: 优先 session store，fallback 到本地模型上下文容量
+      let maxCtx = metrics?.contextTokens ?? 0;
+      if (maxCtx <= 0) {
+        maxCtx = resolveModelContextWindow(metrics?.model) ?? 0;
+      }
+      if (used > 0 || maxCtx > 0) {
+        if (used > 0 && maxCtx > 0) {
+          const pct = Math.round((used / maxCtx) * 100);
+          primaryParts.push(`🧠 ${compactNumber(used)}/${compactNumber(maxCtx)} (${pct}%)`);
+        } else if (maxCtx > 0) {
+          primaryParts.push(`🧠 ${compactNumber(maxCtx)}`);
         } else {
-          primaryParts.push('🧠 -');
+          primaryParts.push(`🧠 ${compactNumber(used)}`);
         }
       } else {
         primaryParts.push('🧠 -');
