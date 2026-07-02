@@ -460,7 +460,8 @@ export class StreamingCardController {
         }
       }
 
-      // Priority 2: Read from session store (cumulative data)
+      // Priority 2: Read contextTokens and model from session store (NOT token data)
+      // Token data should only come from lastUsage (per-turn), not session store (cumulative)
       const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
       const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
       const key = this.deps.sessionKey.trim().toLowerCase();
@@ -488,38 +489,10 @@ export class StreamingCardController {
         }
 
         if (entry) {
-          // session store 中的 inputTokens/outputTokens 是当前 run 的 token 使用量（由 persistSessionUsageUpdate 写入）
-          // 不是累计值，可以作为 footer 和 stats 的数据源
-          const inputTokens = typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined;
-          const outputTokens = typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined;
-          const totalTokensRaw = typeof entry.totalTokens === 'number' ? entry.totalTokens : undefined;
-          // Compute totalTokens from input+output when runtime hasn't written it yet (streaming phase)
-          const totalTokens = totalTokensRaw ?? (
-            (inputTokens != null || outputTokens != null) ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined
-          );
-
-          // 修正缓存命中率：session store 的 cacheRead/cacheWrite 只有最后一次 LLM 调用的值
-          // 读取 transcript 文件累加所有 LLM 调用的 cache 数据，得到整轮对话的正确值
-          let resolvedCacheRead = typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined;
-          let resolvedCacheWrite = typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined;
-          const sessionFile = typeof entry.sessionFile === 'string' ? entry.sessionFile : undefined;
-          if (sessionFile) {
-            try {
-              const transcriptCache = await this.accumulateTranscriptCacheUsage(sessionFile);
-              if (transcriptCache.cacheRead != null) resolvedCacheRead = transcriptCache.cacheRead;
-              if (transcriptCache.cacheWrite != null) resolvedCacheWrite = transcriptCache.cacheWrite;
-              // 同步设置 transcriptCacheUsage，确保 recordSessionStats 也能使用修正后的值
-              this.transcriptCacheUsage = transcriptCache;
-              log.debug('footer metrics: transcript cache corrected', { storeCacheRead: entry.cacheRead, transcriptCacheRead: resolvedCacheRead });
-            } catch { /* fallback to session store values */ }
-          }
-
+          // 只从 session store 读取 contextTokens 和 model（用于 footer 显示）
+          // token 数据（inputTokens/outputTokens/cacheRead/cacheWrite）不从 session store 读取
+          // 因为 session store 的 token 数据是上一轮的，不是当前对话的
           return {
-            inputTokens,
-            outputTokens,
-            cacheRead: resolvedCacheRead,
-            cacheWrite: resolvedCacheWrite,
-            totalTokens,
             contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
             model: typeof entry.model === 'string' ? entry.model : undefined,
           };
