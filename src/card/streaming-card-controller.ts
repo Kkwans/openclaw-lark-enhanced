@@ -1076,7 +1076,7 @@ export class StreamingCardController {
         const isNoReplyLeak =
           !this.text.completedText && SILENT_REPLY_TOKEN.startsWith(this.text.accumulatedText.trim());
         const displayText =
-          this.text.completedText || (isNoReplyLeak ? '' : this.text.accumulatedText) || EMPTY_REPLY_FALLBACK_TEXT;
+          (isNoReplyLeak ? '' : this.text.accumulatedText) || this.text.completedText || EMPTY_REPLY_FALLBACK_TEXT;
         if (!this.text.completedText && !this.text.accumulatedText) {
           log.warn('reply completed without visible text, using empty-reply fallback');
         }
