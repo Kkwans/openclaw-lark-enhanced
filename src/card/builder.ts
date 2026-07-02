@@ -964,10 +964,19 @@ function buildStreamingToolUseActivePanel(params: { steps: ToolUseDisplayStep[];
 }
 
 export function toCardKit2(card: FeishuCard): Record<string, unknown> {
+  // V2 cards do not support `tag: 'action'` wrapper (causes error 200861).
+  // Unwrap action elements: extract inner buttons so they appear directly
+  // in the elements array, which V2 does support.
+  const v2Elements = card.elements.flatMap((el: Record<string, unknown>) => {
+    if (el.tag === 'action' && Array.isArray(el.actions)) {
+      return el.actions;
+    }
+    return [el];
+  });
   const result: Record<string, unknown> = {
     schema: '2.0',
     config: card.config,
-    body: { elements: card.elements },
+    body: { elements: v2Elements },
   };
   if (card.header) result.header = card.header;
   return result;
