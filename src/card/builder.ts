@@ -436,7 +436,7 @@ function buildStreamingCard(
       if (completedOutputs && completedOutputs[i]) {
         elements.push({
           tag: 'markdown',
-          content: completedOutputs[i],
+          content: optimizeMarkdownStyle(completedOutputs[i]),
         });
       }
     }
@@ -457,7 +457,7 @@ function buildStreamingCard(
     // Answer phase: show answer content only
     elements.push({
       tag: 'markdown',
-      content: partialText,
+      content: optimizeMarkdownStyle(partialText),
     });
   }
 
@@ -653,7 +653,7 @@ function buildCompleteCard(params: {
       if (completedOutputs && completedOutputs[i]) {
         elements.push({
           tag: 'markdown',
-          content: completedOutputs[i],
+          content: optimizeMarkdownStyle(completedOutputs[i]),
         });
       }
     }
@@ -676,7 +676,7 @@ function buildCompleteCard(params: {
     if (!alreadyShown) {
       elements.push({
         tag: 'markdown',
-        content: text,
+        content: optimizeMarkdownStyle(text),
       });
     }
   }
