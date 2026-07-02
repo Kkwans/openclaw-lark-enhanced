@@ -591,9 +591,13 @@ export class StreamingCardController {
             const entry = store[candidate] as Record<string, unknown> | undefined;
             if (entry && typeof entry === 'object') {
               const report = entry.systemPromptReport as Record<string, unknown> | undefined;
+              const provider = report?.provider as string | undefined;
               const model = report?.model as string | undefined ?? entry.model as string | undefined;
               if (model) {
-                this.streamingFooter.setDefaultModel(model);
+                // 拼接 provider 前缀，确保与 models-context-window.json 的 key 格式一致
+                // session store 中 model 为 "mimo-v2.5-pro"，JSON 中 key 为 "mimo/mimo-v2.5-pro"
+                const fullModel = provider && !model.includes('/') ? `${provider}/${model}` : model;
+                this.streamingFooter.setDefaultModel(fullModel);
                 break;
               }
             }
