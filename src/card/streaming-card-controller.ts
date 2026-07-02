@@ -1120,13 +1120,26 @@ export class StreamingCardController {
             seqBefore: seqBeforeUpdate,
             seqAfter: this.cardKit.cardKitSequence,
           });
-          await updateCardKitCard({
-            cfg: this.deps.cfg,
-            cardId: idleEffectiveCardId,
-            card: toCardKit2(completeCard),
-            sequence: this.cardKit.cardKitSequence,
-            accountId: this.deps.accountId,
-          });
+          try {
+            await updateCardKitCard({
+              cfg: this.deps.cfg,
+              cardId: idleEffectiveCardId,
+              card: toCardKit2(completeCard),
+              sequence: this.cardKit.cardKitSequence,
+              accountId: this.deps.accountId,
+            });
+          } catch (cardKitErr) {
+            // CardKit 更新失败，fallback 到 IM patch（V1 格式，支持 Markdown 渲染）
+            log.warn('onIdle: CardKit final update failed, falling back to IM patch', {
+              error: String(cardKitErr),
+            });
+            await updateCardFeishu({
+              cfg: this.deps.cfg,
+              messageId: this.cardKit.cardMessageId,
+              card: completeCard as unknown as Record<string, unknown>,
+              accountId: this.deps.accountId,
+            });
+          }
         } else {
           await updateCardFeishu({
             cfg: this.deps.cfg,
@@ -1397,12 +1410,8 @@ export class StreamingCardController {
   private async performFlush(): Promise<void> {
     if (!this.cardKit.cardMessageId || this.isTerminalPhase) return;
 
-    // v2 CardKit 卡片不能走 IM patch，如果流式 CardKit 已禁用但 originalCardKitCardId
-    // 仍在，说明卡片是通过 CardKit 发的——跳过中间态更新，等终态用 originalCardKitCardId 收尾
-    if (!this.cardKit.cardKitCardId && this.cardKit.originalCardKitCardId) {
-      log.debug('performFlush: skipping (CardKit streaming disabled, awaiting final update)');
-      return;
-    }
+    // 当 CardKit 流式更新失败时（cardKitCardId = null），fallback 到 IM patch
+    // IM patch 使用 V1 格式，支持 Markdown 渲染
 
     log.debug('flushCardUpdate: enter', {
       seq: this.cardKit.cardKitSequence,
