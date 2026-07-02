@@ -137,8 +137,10 @@ export function stripReasoningTags(text: string): string {
     /<\s*(?:think(?:ing)?|thought|antthinking)\s*>[\s\S]*?<\s*\/\s*(?:think(?:ing)?|thought|antthinking)\s*>/gi,
     '',
   );
-  // Strip unclosed tag at end (streaming)
-  result = result.replace(/<\s*(?:think(?:ing)?|thought|antthinking)\s*>[\s\S]*$/gi, '');
+  // Strip unclosed tag at start (streaming)
+  // Only match when <think> is at the beginning of text — real reasoning always starts at the top.
+  // Literal <think> mentions in answer text (e.g. discussing the tag) must NOT be stripped.
+  result = result.replace(/^[\s]*<\s*(?:think(?:ing)?|thought|antthinking)\s*>[\s\S]*$/gi, '');
   // Strip orphaned closing tags
   result = result.replace(/<\s*\/\s*(?:think(?:ing)?|thought|antthinking)\s*>/gi, '');
   return result.trim();
