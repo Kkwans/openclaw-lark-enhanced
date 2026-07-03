@@ -144,6 +144,8 @@ export class StreamingCardController {
   private disposeShutdownHook: (() => void) | null = null;
   // sessionId-based key for session stats (resolved at runtime)
   private sessionStatsKey: string | null = null;
+  // 上一轮 lastUsage.input 累计值，用于计算本轮差值（lastUsage.input 是会话累计值）
+  private previousRoundInputTokens: number = 0;
   private readonly dispatchStartTime = Date.now();
 
   // ---- Injected dependencies ----
@@ -233,7 +235,11 @@ export class StreamingCardController {
 
       if (lastUsage) {
         // OpenClaw runtime lastUsage fields: input, output, cacheRead, cacheWrite, total
-        const input = typeof lastUsage.input === 'number' ? lastUsage.input : undefined;
+        // lastUsage.input 是会话累计值，需要减去上一轮的值得到本轮差值
+        const rawInput = typeof lastUsage.input === 'number' ? lastUsage.input : undefined;
+        const input = (rawInput != null && rawInput >= this.previousRoundInputTokens && this.previousRoundInputTokens > 0)
+          ? rawInput - this.previousRoundInputTokens
+          : rawInput; // 首轮或异常情况 fallback
         const output = typeof lastUsage.output === 'number' ? lastUsage.output : undefined;
         let cacheRead = typeof lastUsage.cacheRead === 'number' ? lastUsage.cacheRead : undefined;
         let cacheWrite = typeof lastUsage.cacheWrite === 'number' ? lastUsage.cacheWrite : undefined;
@@ -243,7 +249,9 @@ export class StreamingCardController {
           if (this.transcriptCacheUsage.cacheWrite != null) cacheWrite = this.transcriptCacheUsage.cacheWrite;
         }
         if (input != null || output != null || cacheRead != null || cacheWrite != null) {
-          log.info('recordSessionStats: lastUsage found', { input, output, cacheRead, cacheWrite });
+          // 记录本轮结束时的累计值，用于下一轮计算差值
+          if (rawInput != null) this.previousRoundInputTokens = rawInput;
+          log.info('recordSessionStats: lastUsage found', { rawInput, input, output, cacheRead, cacheWrite });
           incrementSessionStats(statsKey, { input, output, cacheRead, cacheWrite });
           return;
         }
@@ -255,6 +263,16 @@ export class StreamingCardController {
         const output = footerMetrics.outputTokens ?? 0;
         const cacheRead = footerMetrics.cacheRead ?? 0;
         const cacheWrite = footerMetrics.cacheWrite ?? 0;
+        // footerMetrics.inputTokens 已经是差值（getFooterSessionMetrics 中计算）
+        // 需要从 lastUsage 读取累计值更新 previousRoundInputTokens，供下一轮计算差值
+        try {
+          const rt = LarkClient.runtime as Record<string, unknown> | null;
+          const ag = rt?.agent as Record<string, unknown> | undefined;
+          const sess = ag?.session as Record<string, unknown> | undefined;
+          const lu = sess?.lastUsage as Record<string, unknown> | undefined;
+          const rawIn = typeof lu?.input === 'number' ? lu.input : undefined;
+          if (rawIn != null) this.previousRoundInputTokens = rawIn;
+        } catch { /* ignore */ }
         log.info('recordSessionStats: using footer metrics (abort path)', { input, output, cacheRead, cacheWrite });
         incrementSessionStats(statsKey, { input, output, cacheRead, cacheWrite });
         return;
@@ -401,7 +419,11 @@ export class StreamingCardController {
 
       if (lastUsage) {
         // OpenClaw runtime lastUsage fields: input, output, cacheRead, cacheWrite, total
-        const inputTokens = typeof lastUsage.input === 'number' ? lastUsage.input : undefined;
+        // lastUsage.input 是会话累计值，需要减去上一轮的值得到本轮差值
+        const rawInput = typeof lastUsage.input === 'number' ? lastUsage.input : undefined;
+        const inputTokens = (rawInput != null && rawInput >= this.previousRoundInputTokens && this.previousRoundInputTokens > 0)
+          ? rawInput - this.previousRoundInputTokens
+          : rawInput; // 首轮或异常情况 fallback
         const outputTokens = typeof lastUsage.output === 'number' ? lastUsage.output : undefined;
         const cacheRead = typeof lastUsage.cacheRead === 'number' ? lastUsage.cacheRead : undefined;
         const cacheWrite = typeof lastUsage.cacheWrite === 'number' ? lastUsage.cacheWrite : undefined;
@@ -455,7 +477,9 @@ export class StreamingCardController {
           const resolvedTotalTokens = totalTokens ?? (
             (inputTokens != null || outputTokens != null) ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined
           );
-          log.debug('footer metrics: using lastUsage (current turn)', { inputTokens, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, contextTokens: resolvedContextTokens, totalTokens: resolvedTotalTokens });
+          // 记录本轮累计值，供下一轮计算差值
+          if (rawInput != null) this.previousRoundInputTokens = rawInput;
+          log.debug('footer metrics: using lastUsage (current turn)', { rawInput, previousRoundInputTokens: this.previousRoundInputTokens, inputTokens, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, contextTokens: resolvedContextTokens, totalTokens: resolvedTotalTokens });
           return { inputTokens, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, totalTokens: resolvedTotalTokens, contextTokens: resolvedContextTokens, model: resolvedModel };
         }
       }
