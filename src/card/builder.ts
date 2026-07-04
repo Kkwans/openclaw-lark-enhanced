@@ -473,27 +473,9 @@ function buildStreamingCard(
     element_id: 'loading_icon',
   });
 
-  // Stop button
-  elements.push({
-    tag: 'action',
-    actions: [
-      {
-        tag: 'button',
-        text: {
-          tag: 'plain_text',
-          content: '⏹️ 停止',
-          i18n_content: {
-            zh_cn: '⏹️ 停止',
-            en_us: '⏹️ Stop',
-          },
-        },
-        type: 'default',
-        value: {
-          action: PAUSE_ACTION_ID,
-        },
-      },
-    ],
-  });
+  // Stop button removed — CardKit V2 does not support 'tag: action'
+  // (causes error 200861). Keeping PAUSE_ACTION_ID / registerPauseTarget
+  // logic intact so the feature can be re-enabled when V2 adds support.
 
   // Structured footer (uses hr + separate elements for proper rendering)
   if (params.footerContent) {
@@ -864,31 +846,10 @@ export function buildStreamingPreAnswerCard(params: {
     element_id: 'loading_icon',
   });
 
-  // Stop button (will be removed in terminal state)
-  // Note: CardKit V2 does not support the 'action' tag — this intentionally
-  // causes CardKit creation to fail and fall back to IM, where the stop button
-  // is functional. The IM fallback path registers the pause target (Fix 3).
-  elements.push({
-    tag: 'action',
-    actions: [
-      {
-        tag: 'button',
-        text: {
-          tag: 'plain_text',
-          content: '⏹️ 停止',
-          i18n_content: {
-            zh_cn: '⏹️ 停止',
-            en_us: '⏹️ Stop',
-          },
-        },
-        type: 'default',
-        value: {
-          action: 'streaming_pause',
-          command: '/stop',
-        },
-      },
-    ],
-  });
+  // Stop button removed — CardKit V2 does not support 'tag: action'
+  // (causes error 200861). Keeping PAUSE_ACTION_ID / registerPauseTarget
+  // logic intact so the feature can be re-enabled when V2 adds support.
+  // See: https://github.com/larksuite/openclaw-lark/issues
 
   // Footer placeholder (will be updated during streaming)
   elements.push({

@@ -516,20 +516,28 @@ export class StreamingCardController {
         }
 
         if (entry) {
-          // 优先从 lastUsage 获取当前轮次的 token 数据
           // 当 lastUsage 不可用时，从 session store 读取作为 fallback
-          // 注意：session store 的 token 数据是会话累计值，但在终态时 lastUsage
-          // 可能为 null（runtime 在 LLM 调用结束后清除），此时使用 session store 数据
-          // 比显示 "-" 更好
+          // session store 的 token 数据是会话累计值，缓存数据只有最后一次调用的值
+          // 需要读 transcript 文件累加所有 LLM 调用的 cache 数据
           const storeModel = typeof entry.model === 'string' ? entry.model : undefined;
-          // 尝试从 systemPromptReport 获取 model（session store 可能没有顶层 model 字段）
           const report = entry.systemPromptReport as Record<string, unknown> | undefined;
           const resolvedModel = storeModel ?? (typeof report?.model === 'string' ? report.model : undefined);
+          let resolvedCacheRead = typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined;
+          let resolvedCacheWrite = typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined;
+          // 读 transcript 文件累加 cache 数据（与 Priority 1 路径一致）
+          const sessionFile = typeof entry.sessionFile === 'string' ? entry.sessionFile : undefined;
+          if (sessionFile) {
+            try {
+              const transcriptCache = await this.accumulateTranscriptCacheUsage(sessionFile);
+              if (transcriptCache.cacheRead != null) resolvedCacheRead = transcriptCache.cacheRead;
+              if (transcriptCache.cacheWrite != null) resolvedCacheWrite = transcriptCache.cacheWrite;
+            } catch { /* fallback to session store values */ }
+          }
           return {
             inputTokens: typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined,
             outputTokens: typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined,
-            cacheRead: typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined,
-            cacheWrite: typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined,
+            cacheRead: resolvedCacheRead,
+            cacheWrite: resolvedCacheWrite,
             totalTokens: typeof entry.totalTokens === 'number' ? entry.totalTokens : undefined,
             contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
             model: resolvedModel,
@@ -1424,7 +1432,7 @@ export class StreamingCardController {
     // 当 CardKit 流式更新失败时（cardKitCardId = null），fallback 到 IM patch
     // IM patch 使用 V1 格式，支持 Markdown 渲染
 
-    log.debug('flushCardUpdate: enter', {
+    log.info('flushCardUpdate: enter', {
       seq: this.cardKit.cardKitSequence,
       isCardKit: !!this.cardKit.cardKitCardId,
     });
