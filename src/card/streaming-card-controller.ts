@@ -263,12 +263,15 @@ export class StreamingCardController {
 
       // Fallback 1: 使用 footer 已经获取到的 metrics（abort 路径传入）
       if (footerMetrics && (footerMetrics.inputTokens || footerMetrics.outputTokens)) {
-        const input = footerMetrics.inputTokens ?? 0;
+        const rawInput = footerMetrics.inputTokens;
+        const input = rawInput != null && rawInput >= this.previousRoundInputTokens && this.previousRoundInputTokens > 0
+          ? rawInput - this.previousRoundInputTokens
+          : rawInput ?? 0;
         const output = footerMetrics.outputTokens ?? 0;
         const cacheRead = footerMetrics.cacheRead ?? 0;
         const cacheWrite = footerMetrics.cacheWrite ?? 0;
-        // footerMetrics.inputTokens 已经是差值（getFooterSessionMetrics 中计算）
-        // 需要从 lastUsage 读取累计值更新 previousRoundInputTokens，供下一轮计算差值
+        // footerMetrics.inputTokens 是累计值，需要减去 previousRoundInputTokens 得到本轮差值
+        // 同时从 lastUsage 读取累计值更新 previousRoundInputTokens，供下一轮计算差值
         try {
           const rt = LarkClient.runtime as Record<string, unknown> | null;
           const ag = rt?.agent as Record<string, unknown> | undefined;
@@ -278,6 +281,10 @@ export class StreamingCardController {
           if (rawIn != null) {
             this.previousRoundInputTokens = rawIn;
             writePreviousRoundInput(this.deps.sessionKey, rawIn);
+          } else if (rawInput != null) {
+            // lastUsage 为 null 时，用 footerMetrics 的累计值更新，供下一轮计算差值
+            this.previousRoundInputTokens = rawInput;
+            writePreviousRoundInput(this.deps.sessionKey, rawInput);
           }
         } catch { /* ignore */ }
         log.info('recordSessionStats: using footer metrics', { input, output, cacheRead, cacheWrite });
