@@ -353,6 +353,7 @@ export function buildCardContent(
         showToolUse: data.showToolUse,
         toolUseSteps: data.toolUseSteps,
         toolUseTitleSuffix: data.toolUseTitleSuffix,
+        toolUseElapsedMs: data.toolUseElapsedMs,
         completedReasonings: data.completedReasonings,
         completedOutputs: data.completedOutputs,
         footerContent: data.footerContent,
@@ -409,12 +410,13 @@ function buildStreamingCard(
     toolUseSteps?: ToolUseDisplayStep[];
     toolUseTitleSuffix?: { zh: string; en: string };
     reasoningText?: string;
+    toolUseElapsedMs?: number;
     completedReasonings?: Array<{ text: string; elapsedMs: number }>;
     completedOutputs?: string[];
     footerContent?: string;
   } = {},
 ): FeishuCard {
-  const { showToolUse = true, toolUseSteps, toolUseTitleSuffix, reasoningText, completedReasonings, completedOutputs } = params;
+  const { showToolUse = true, toolUseSteps, toolUseTitleSuffix, reasoningText, toolUseElapsedMs, completedReasonings, completedOutputs } = params;
   const elements: CardElement[] = [];
   const hasToolUse = Boolean(toolUseSteps?.length);
 
