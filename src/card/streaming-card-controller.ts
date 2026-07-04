@@ -555,6 +555,15 @@ export class StreamingCardController {
   constructor(deps: StreamingCardDeps) {
     this.deps = deps;
 
+    // 初始化 previousRoundInputTokens：从 session store 读取上一轮的累计值
+    // 这样首轮的差值计算不会显示整个会话的累计值
+    try {
+      const storeTokens = this.readSessionStoreTokens();
+      if (storeTokens?.input != null) {
+        this.previousRoundInputTokens = storeTokens.input;
+      }
+    } catch { /* ignore */ }
+
     this.guard = new UnavailableGuard({
       replyToMessageId: deps.replyToMessageId,
       getCardMessageId: () => this.cardKit.cardMessageId,
