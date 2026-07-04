@@ -253,7 +253,7 @@ export class StreamingCardController {
           // 记录本轮结束时的累计值，用于下一轮计算差值
           if (rawInput != null) {
             this.previousRoundInputTokens = rawInput;
-            writePreviousRoundInput(statsKey, rawInput);
+            writePreviousRoundInput(this.deps.sessionKey, rawInput);
           }
           log.info('recordSessionStats: lastUsage found', { rawInput, previousRoundInputTokens: this.previousRoundInputTokens, input, output, cacheRead, cacheWrite });
           incrementSessionStats(statsKey, { input, output, cacheRead, cacheWrite });
@@ -277,7 +277,7 @@ export class StreamingCardController {
           const rawIn = typeof lu?.input === 'number' ? lu.input : undefined;
           if (rawIn != null) {
             this.previousRoundInputTokens = rawIn;
-            writePreviousRoundInput(statsKey, rawIn);
+            writePreviousRoundInput(this.deps.sessionKey, rawIn);
           }
         } catch { /* ignore */ }
         log.info('recordSessionStats: using footer metrics', { input, output, cacheRead, cacheWrite });
