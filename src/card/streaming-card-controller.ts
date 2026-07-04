@@ -377,7 +377,7 @@ export class StreamingCardController {
       if (!runtime) return undefined;
 
       // Helper: read contextTokens + model + cache from session store (fallback)
-      const readSessionStoreFallback = (): { contextTokens?: number; model?: string; cacheRead?: number; cacheWrite?: number } => {
+      const readSessionStoreFallback = (): { contextTokens?: number; model?: string; cacheRead?: number; cacheWrite?: number; inputTokens?: number; outputTokens?: number; totalTokens?: number } => {
         try {
           const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
           const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
@@ -404,6 +404,9 @@ export class StreamingCardController {
                   model: typeof entry.model === 'string' ? entry.model : undefined,
                   cacheRead: typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined,
                   cacheWrite: typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined,
+                  inputTokens: typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined,
+                  outputTokens: typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined,
+                  totalTokens: typeof entry.totalTokens === 'number' ? entry.totalTokens : undefined,
                 };
               }
             }
@@ -513,12 +516,23 @@ export class StreamingCardController {
         }
 
         if (entry) {
-          // 只从 session store 读取 contextTokens 和 model（用于 footer 显示）
-          // token 数据（inputTokens/outputTokens/cacheRead/cacheWrite）不从 session store 读取
-          // 因为 session store 的 token 数据是上一轮的，不是当前对话的
+          // 优先从 lastUsage 获取当前轮次的 token 数据
+          // 当 lastUsage 不可用时，从 session store 读取作为 fallback
+          // 注意：session store 的 token 数据是会话累计值，但在终态时 lastUsage
+          // 可能为 null（runtime 在 LLM 调用结束后清除），此时使用 session store 数据
+          // 比显示 "-" 更好
+          const storeModel = typeof entry.model === 'string' ? entry.model : undefined;
+          // 尝试从 systemPromptReport 获取 model（session store 可能没有顶层 model 字段）
+          const report = entry.systemPromptReport as Record<string, unknown> | undefined;
+          const resolvedModel = storeModel ?? (typeof report?.model === 'string' ? report.model : undefined);
           return {
+            inputTokens: typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined,
+            outputTokens: typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined,
+            cacheRead: typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined,
+            cacheWrite: typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined,
+            totalTokens: typeof entry.totalTokens === 'number' ? entry.totalTokens : undefined,
             contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
-            model: typeof entry.model === 'string' ? entry.model : undefined,
+            model: resolvedModel,
           };
         }
       }
