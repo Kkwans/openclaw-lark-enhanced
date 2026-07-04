@@ -261,33 +261,18 @@ export class StreamingCardController {
         }
       }
 
-      // Fallback 1: 使用 footer 已经获取到的 metrics（abort 路径传入）
+      // Fallback 1: 使用 footer 已经获取到的 metrics（由 getFooterSessionMetrics 计算好的差值）
+      // footerMetrics.inputTokens 已经是本轮差值（lastUsage.input - previousRoundInputTokens）
+      // 不能再减一次 previousRoundInputTokens，否则会双重减法导致统计值偏小
       if (footerMetrics && (footerMetrics.inputTokens || footerMetrics.outputTokens)) {
-        const rawInput = footerMetrics.inputTokens;
-        const input = rawInput != null && rawInput >= this.previousRoundInputTokens && this.previousRoundInputTokens > 0
-          ? rawInput - this.previousRoundInputTokens
-          : rawInput ?? 0;
+        const input = footerMetrics.inputTokens ?? 0;
         const output = footerMetrics.outputTokens ?? 0;
         const cacheRead = footerMetrics.cacheRead ?? 0;
         const cacheWrite = footerMetrics.cacheWrite ?? 0;
-        // footerMetrics.inputTokens 是累计值，需要减去 previousRoundInputTokens 得到本轮差值
-        // 同时从 lastUsage 读取累计值更新 previousRoundInputTokens，供下一轮计算差值
-        try {
-          const rt = LarkClient.runtime as Record<string, unknown> | null;
-          const ag = rt?.agent as Record<string, unknown> | undefined;
-          const sess = ag?.session as Record<string, unknown> | undefined;
-          const lu = sess?.lastUsage as Record<string, unknown> | undefined;
-          const rawIn = typeof lu?.input === 'number' ? lu.input : undefined;
-          if (rawIn != null) {
-            this.previousRoundInputTokens = rawIn;
-            writePreviousRoundInput(this.deps.sessionKey, rawIn);
-          } else if (rawInput != null) {
-            // lastUsage 为 null 时，用 footerMetrics 的累计值更新，供下一轮计算差值
-            this.previousRoundInputTokens = rawInput;
-            writePreviousRoundInput(this.deps.sessionKey, rawInput);
-          }
-        } catch { /* ignore */ }
-        log.info('recordSessionStats: using footer metrics', { input, output, cacheRead, cacheWrite });
+        // 更新 previousRoundInputTokens：从 lastUsage 读取累计值
+        // footerMetrics 已经在 getFooterSessionMetrics 中更新过 previousRoundInputTokens
+        // 这里只需确保 lastUsage 可用时同步更新（防御性代码）
+        log.info('recordSessionStats: using footer metrics (pre-computed delta)', { input, output, cacheRead, cacheWrite });
         incrementSessionStats(statsKey, { input, output, cacheRead, cacheWrite });
         return;
       }
@@ -547,8 +532,18 @@ export class StreamingCardController {
               if (transcriptCache.cacheWrite != null) resolvedCacheWrite = transcriptCache.cacheWrite;
             } catch { /* fallback to session store values */ }
           }
+          // session store 的 inputTokens 是累计值，需要减去 previousRoundInputTokens 得到本轮差值
+          const rawStoreInput = typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined;
+          const storeInputTokens = (rawStoreInput != null && rawStoreInput >= this.previousRoundInputTokens && this.previousRoundInputTokens > 0)
+            ? rawStoreInput - this.previousRoundInputTokens
+            : rawStoreInput;
+          // 更新 previousRoundInputTokens 供下一轮计算
+          if (rawStoreInput != null) {
+            this.previousRoundInputTokens = rawStoreInput;
+            writePreviousRoundInput(this.deps.sessionKey, rawStoreInput);
+          }
           return {
-            inputTokens: typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined,
+            inputTokens: storeInputTokens,
             outputTokens: typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined,
             cacheRead: resolvedCacheRead,
             cacheWrite: resolvedCacheWrite,
