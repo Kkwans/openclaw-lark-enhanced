@@ -1125,6 +1125,12 @@ export class StreamingCardController {
         // 等待图片异步解析（最多 15s），避免终态卡片留占位符
         const resolvedDisplayText = await this.imageResolver.resolveImagesAwait(displayText, 15_000);
 
+        // 调试日志：打印终态卡片 markdown 内容长度
+        log.info('onIdle: terminal content', {
+          textLen: resolvedDisplayText.length,
+          textPreview: resolvedDisplayText.slice(0, 200),
+        });
+
         const idleToolUseDisplay = this.computeToolUseDisplay();
         const terminalContent = prepareTerminalCardContent(
           {
@@ -1463,6 +1469,12 @@ export class StreamingCardController {
       const displayText = this.buildDisplayText();
       // 流式中间帧使用同步 resolveImages（不等待异步上传）
       const resolvedText = this.imageResolver.resolveImages(displayText);
+
+      // 调试日志：打印发送到卡片的 markdown 内容长度
+      log.info('flushCardUpdate: content', {
+        textLen: resolvedText.length,
+        textPreview: resolvedText.slice(0, 200),
+      });
 
       // 流式 footer 使用 getFooterSessionMetrics（含 session store fallback）
       // 因为 lastUsage 在流式过程中始终为 null，无法获取实时 token 数据
