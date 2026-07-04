@@ -51,6 +51,7 @@ import { clearToolUseTraceRun, getToolUseTraceSteps } from './tool-use-trace-sto
 import { StreamingFooter } from './streaming-footer';
 import { registerPauseTarget, unregisterPauseTarget } from './pause-registry';
 import { incrementSessionStats, resolveSessionStatsKey } from './session-stats';
+import { readPreviousRoundInput, writePreviousRoundInput } from './round-state';
 import type {
   CardKitState,
   CardPhase,
@@ -250,8 +251,11 @@ export class StreamingCardController {
         }
         if (input != null || output != null || cacheRead != null || cacheWrite != null) {
           // 记录本轮结束时的累计值，用于下一轮计算差值
-          if (rawInput != null) this.previousRoundInputTokens = rawInput;
-          log.info('recordSessionStats: lastUsage found', { rawInput, input, output, cacheRead, cacheWrite });
+          if (rawInput != null) {
+            this.previousRoundInputTokens = rawInput;
+            writePreviousRoundInput(statsKey, rawInput);
+          }
+          log.info('recordSessionStats: lastUsage found', { rawInput, previousRoundInputTokens: this.previousRoundInputTokens, input, output, cacheRead, cacheWrite });
           incrementSessionStats(statsKey, { input, output, cacheRead, cacheWrite });
           return;
         }
@@ -271,9 +275,12 @@ export class StreamingCardController {
           const sess = ag?.session as Record<string, unknown> | undefined;
           const lu = sess?.lastUsage as Record<string, unknown> | undefined;
           const rawIn = typeof lu?.input === 'number' ? lu.input : undefined;
-          if (rawIn != null) this.previousRoundInputTokens = rawIn;
+          if (rawIn != null) {
+            this.previousRoundInputTokens = rawIn;
+            writePreviousRoundInput(statsKey, rawIn);
+          }
         } catch { /* ignore */ }
-        log.info('recordSessionStats: using footer metrics (abort path)', { input, output, cacheRead, cacheWrite });
+        log.info('recordSessionStats: using footer metrics', { input, output, cacheRead, cacheWrite });
         incrementSessionStats(statsKey, { input, output, cacheRead, cacheWrite });
         return;
       }
@@ -555,12 +562,18 @@ export class StreamingCardController {
   constructor(deps: StreamingCardDeps) {
     this.deps = deps;
 
-    // 初始化 previousRoundInputTokens：从 session store 读取上一轮的累计值
-    // 这样首轮的差值计算不会显示整个会话的累计值
+    // 初始化 previousRoundInputTokens：从插件自己的状态文件读取上一轮的累计值
+    // 不依赖 session store（runtime 可能在 turn 运行期间更新它，导致读到当前轮的值）
     try {
-      const storeTokens = this.readSessionStoreTokens();
-      if (storeTokens?.input != null) {
-        this.previousRoundInputTokens = storeTokens.input;
+      const prevInput = readPreviousRoundInput(deps.sessionKey);
+      if (prevInput != null) {
+        this.previousRoundInputTokens = prevInput;
+      } else {
+        // Fallback：从 session store 读取（首次运行或状态文件丢失时）
+        const storeTokens = this.readSessionStoreTokens();
+        if (storeTokens?.input != null) {
+          this.previousRoundInputTokens = storeTokens.input;
+        }
       }
     } catch { /* ignore */ }
 
@@ -1015,7 +1028,7 @@ export class StreamingCardController {
     const errorEffectiveCardId = this.cardKit.cardKitCardId ?? this.cardKit.originalCardKitCardId;
     const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
     // Record session stats AFTER getFooterSessionMetrics() to ensure lastUsage is available
-    this.recordSessionStats();
+    this.recordSessionStats(true, footerMetrics);
     const toolUseDisplay = this.computeToolUseDisplay();
     try {
       if (this.cardKit.cardMessageId) {
@@ -1123,7 +1136,7 @@ export class StreamingCardController {
         const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
 
         // Record session stats AFTER getFooterSessionMetrics() to ensure lastUsage is available
-        this.recordSessionStats();
+        this.recordSessionStats(true, footerMetrics);
 
         const completeCard = buildCardContent('complete', {
           text: terminalContent.text,
