@@ -1296,7 +1296,7 @@ export class StreamingCardController {
           // Step 1: Create card entity
           const cId = await createCardEntity({
             cfg: this.deps.cfg,
-            card: toCardKit2(buildStreamingThinkingCard(this.deps.toolUseDisplay.showToolUse)),
+            card: buildStreamingThinkingCard(this.deps.toolUseDisplay.showToolUse),
             accountId: this.deps.accountId,
           });
 
