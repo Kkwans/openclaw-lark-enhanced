@@ -233,7 +233,9 @@ export class StreamingCardController {
       if (this.transcriptCacheUsage && (this.transcriptCacheUsage.input != null || this.transcriptCacheUsage.cacheRead != null)) {
         const transcriptInput = this.transcriptCacheUsage.input ?? 0;
         const transcriptCacheRead = this.transcriptCacheUsage.cacheRead ?? 0;
-        const input = transcriptInput + transcriptCacheRead; // 含缓存的总输入
+        // input = 非缓存 input（不含 cacheRead），与 lastUsage 路径语义一致
+        // 数据库中 input_tokens + cache_read = prompt_tokens
+        const input = transcriptInput;
         const output = this.transcriptCacheUsage.output;
         const cacheRead = this.transcriptCacheUsage.cacheRead;
         const cacheWrite = this.transcriptCacheUsage.cacheWrite;
@@ -468,11 +470,10 @@ export class StreamingCardController {
         } catch { /* ignore */ }
       }
 
-      // Use transcript data: input + cacheRead = total input tokens (含缓存命中)
+      // Use transcript data: input (non-cached) + cacheRead = total prompt tokens
       if (transcriptData && (transcriptData.input != null || transcriptData.cacheRead != null)) {
-        const transcriptInput = transcriptData.input ?? 0;
-        const transcriptCacheRead = transcriptData.cacheRead ?? 0;
-        const totalInputTokens = transcriptInput + transcriptCacheRead; // 含缓存的总输入
+        const transcriptInput = transcriptData.input ?? 0;           // 非缓存 input
+        const transcriptCacheRead = transcriptData.cacheRead ?? 0;    // 缓存命中
         const outputTokens = transcriptData.output;
         const resolvedCacheRead = transcriptData.cacheRead;
         const resolvedCacheWrite = transcriptData.cacheWrite;
@@ -484,13 +485,16 @@ export class StreamingCardController {
         const contextTokens = (typeof lastUsage?.contextTokens === 'number' ? lastUsage.contextTokens : undefined) ?? fallback.contextTokens;
         const model = (typeof lastUsage?.model === 'string' ? lastUsage.model : undefined) ?? fallback.model;
 
-        log.info('footer metrics: using transcript (current turn)', { transcriptInput, transcriptCacheRead, totalInputTokens, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, contextTokens, model });
+        // inputTokens = 非缓存 input（不含 cacheRead）
+        // 与 lastUsage 路径语义一致：footer 的 inputTokens + cacheRead = prompt_tokens
+        // totalTokens = prompt_tokens + output（用于上下文窗口显示）
+        log.info('footer metrics: using transcript (current turn)', { transcriptInput, transcriptCacheRead, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, contextTokens, model });
         return {
-          inputTokens: totalInputTokens > 0 ? totalInputTokens : undefined,
+          inputTokens: transcriptInput > 0 ? transcriptInput : undefined,
           outputTokens,
           cacheRead: resolvedCacheRead,
           cacheWrite: resolvedCacheWrite,
-          totalTokens: (totalInputTokens > 0 || outputTokens != null) ? totalInputTokens + (outputTokens ?? 0) : undefined,
+          totalTokens: (transcriptInput > 0 || transcriptCacheRead > 0 || outputTokens != null) ? transcriptInput + transcriptCacheRead + (outputTokens ?? 0) : undefined,
           contextTokens,
           model,
         };
@@ -568,14 +572,15 @@ export class StreamingCardController {
               if (transcriptCache.cacheWrite != null) resolvedCacheWrite = transcriptCache.cacheWrite;
               // Also use transcript input/output if available
               if (transcriptCache.input != null || transcriptCache.cacheRead != null) {
-                const totalInput = (transcriptCache.input ?? 0) + (transcriptCache.cacheRead ?? 0);
-                log.info('footer metrics: using transcript from session store fallback', { totalInput, output: transcriptCache.output, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite });
+                const transcriptNonCached = transcriptCache.input ?? 0;
+                const transcriptCached = transcriptCache.cacheRead ?? 0;
+                log.info('footer metrics: using transcript from session store fallback', { transcriptNonCached, transcriptCached, output: transcriptCache.output, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite });
                 return {
-                  inputTokens: totalInput > 0 ? totalInput : undefined,
+                  inputTokens: transcriptNonCached > 0 ? transcriptNonCached : undefined,
                   outputTokens: transcriptCache.output,
                   cacheRead: resolvedCacheRead,
                   cacheWrite: resolvedCacheWrite,
-                  totalTokens: (totalInput > 0 || transcriptCache.output != null) ? totalInput + (transcriptCache.output ?? 0) : undefined,
+                  totalTokens: (transcriptNonCached > 0 || transcriptCached > 0 || transcriptCache.output != null) ? transcriptNonCached + transcriptCached + (transcriptCache.output ?? 0) : undefined,
                   contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
                   model: resolvedModel,
                 };
