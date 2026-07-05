@@ -319,6 +319,11 @@ export class StreamingFooter {
     return true;
   }
 
+  /** Get the last built footer content (for reuse when shouldUpdate() is false). */
+  getLastContent(): string {
+    return this.state.lastContent;
+  }
+
   /** Record stats when a turn completes. */
   recordTurnCompletion(metrics?: FooterSessionMetrics): void {
     if (!metrics) return;

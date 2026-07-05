@@ -1524,7 +1524,7 @@ export class StreamingCardController {
         const flushDisplay = this.computeToolUseDisplay();
         const footerContent = this.streamingFooter.shouldUpdate()
           ? this.streamingFooter.buildContent(streamingMetrics)
-          : undefined;
+          : this.streamingFooter.getLastContent() || undefined;
         const card = buildCardContent('streaming', {
           text: this.reasoning.isReasoningPhase ? '' : resolvedText,
           reasoningText: this.reasoning.isReasoningPhase ? this.reasoning.accumulatedReasoningText : undefined,
@@ -1555,7 +1555,7 @@ export class StreamingCardController {
         const flushDisplay = this.computeToolUseDisplay();
         const footerContent = this.streamingFooter.shouldUpdate()
           ? this.streamingFooter.buildContent(streamingMetrics)
-          : undefined;
+          : this.streamingFooter.getLastContent() || undefined;
         const card = buildCardContent('streaming', {
           text: this.reasoning.isReasoningPhase ? '' : resolvedText,
           reasoningText: this.reasoning.isReasoningPhase ? this.reasoning.accumulatedReasoningText : undefined,
