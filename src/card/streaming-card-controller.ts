@@ -487,14 +487,16 @@ export class StreamingCardController {
 
         // inputTokens = 非缓存 input（不含 cacheRead）
         // 与 lastUsage 路径语义一致：footer 的 inputTokens + cacheRead = prompt_tokens
-        // totalTokens = prompt_tokens + output（用于上下文窗口显示）
-        log.info('footer metrics: using transcript (current turn)', { transcriptInput, transcriptCacheRead, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, contextTokens, model });
+        // totalTokens 从 lastUsage / session store 获取（runtime 更新的准确值，考虑了上下文压缩）
+        // 不用 transcript 累加值（会忽略上下文压缩，导致越累积越大）
+        const lastUsageTotal = (typeof lastUsage?.total === 'number' ? lastUsage.total : undefined) ?? fallback.totalTokens;
+        log.info('footer metrics: using transcript (current turn)', { transcriptInput, transcriptCacheRead, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, contextTokens, model, lastUsageTotal });
         return {
           inputTokens: transcriptInput > 0 ? transcriptInput : undefined,
           outputTokens,
           cacheRead: resolvedCacheRead,
           cacheWrite: resolvedCacheWrite,
-          totalTokens: (transcriptInput > 0 || transcriptCacheRead > 0 || outputTokens != null) ? transcriptInput + transcriptCacheRead + (outputTokens ?? 0) : undefined,
+          totalTokens: lastUsageTotal,
           contextTokens,
           model,
         };
@@ -575,12 +577,13 @@ export class StreamingCardController {
                 const transcriptNonCached = transcriptCache.input ?? 0;
                 const transcriptCached = transcriptCache.cacheRead ?? 0;
                 log.info('footer metrics: using transcript from session store fallback', { transcriptNonCached, transcriptCached, output: transcriptCache.output, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite });
+                // totalTokens 从 session store 获取（runtime 更新的准确值，考虑了上下文压缩）
                 return {
                   inputTokens: transcriptNonCached > 0 ? transcriptNonCached : undefined,
                   outputTokens: transcriptCache.output,
                   cacheRead: resolvedCacheRead,
                   cacheWrite: resolvedCacheWrite,
-                  totalTokens: (transcriptNonCached > 0 || transcriptCached > 0 || transcriptCache.output != null) ? transcriptNonCached + transcriptCached + (transcriptCache.output ?? 0) : undefined,
+                  totalTokens: typeof entry.totalTokens === 'number' ? entry.totalTokens : undefined,
                   contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
                   model: resolvedModel,
                 };
