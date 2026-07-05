@@ -51,7 +51,7 @@ import { clearToolUseTraceRun, getToolUseTraceSteps } from './tool-use-trace-sto
 import { StreamingFooter } from './streaming-footer';
 import { registerPauseTarget, unregisterPauseTarget } from './pause-registry';
 import { incrementSessionStats, resolveSessionStatsKey } from './session-stats';
-import { readPreviousRoundInput, writePreviousRoundInput } from './round-state';
+
 import type {
   CardKitState,
   CardPhase,
@@ -140,13 +140,12 @@ export class StreamingCardController {
   /** Set when onDeliver just populated streamingPrefix, to prevent onPartialReply from duplicating. */
   private deliverJustSetPrefix = false;
   /** Cached transcript cache usage (accumulated across all LLM calls in the turn). */
-  private transcriptCacheUsage: { cacheRead?: number; cacheWrite?: number } | null = null;
+  private transcriptCacheUsage: { cacheRead?: number; cacheWrite?: number; input?: number; output?: number } | null = null;
   private cardCreationPromise: Promise<void> | null = null;
   private disposeShutdownHook: (() => void) | null = null;
   // sessionId-based key for session stats (resolved at runtime)
   private sessionStatsKey: string | null = null;
-  // 上一轮 lastUsage.input 累计值，用于计算本轮差值（lastUsage.input 是会话累计值）
-  private previousRoundInputTokens: number = 0;
+
   private readonly dispatchStartTime = Date.now();
 
   // ---- Injected dependencies ----
@@ -230,48 +229,42 @@ export class StreamingCardController {
         }
       } catch { /* 检测失败使用原始 sessionKey */ }
 
+      // Priority 1: 使用 transcript 累加数据（最权威的当前轮数据源）
+      if (this.transcriptCacheUsage && (this.transcriptCacheUsage.input != null || this.transcriptCacheUsage.cacheRead != null)) {
+        const transcriptInput = this.transcriptCacheUsage.input ?? 0;
+        const transcriptCacheRead = this.transcriptCacheUsage.cacheRead ?? 0;
+        const input = transcriptInput + transcriptCacheRead; // 含缓存的总输入
+        const output = this.transcriptCacheUsage.output;
+        const cacheRead = this.transcriptCacheUsage.cacheRead;
+        const cacheWrite = this.transcriptCacheUsage.cacheWrite;
+        log.info('recordSessionStats: using transcript data', { input, output, cacheRead, cacheWrite });
+        incrementSessionStats(statsKey, { input, output, cacheRead, cacheWrite });
+        return;
+      }
+
+      // Priority 2: Fallback to lastUsage (runtime data, may be inaccurate)
       const agent = runtime.agent as Record<string, unknown> | undefined;
       const session = agent?.session as Record<string, unknown> | undefined;
       const lastUsage = session?.lastUsage as Record<string, unknown> | undefined;
 
       if (lastUsage) {
-        // OpenClaw runtime lastUsage fields: input, output, cacheRead, cacheWrite, total
-        // lastUsage.input 是会话累计值，需要减去上一轮的值得到本轮差值
-        const rawInput = typeof lastUsage.input === 'number' ? lastUsage.input : undefined;
-        const input = (rawInput != null && rawInput >= this.previousRoundInputTokens && this.previousRoundInputTokens > 0)
-          ? rawInput - this.previousRoundInputTokens
-          : rawInput; // 首轮或异常情况 fallback
+        const input = typeof lastUsage.input === 'number' ? lastUsage.input : undefined;
         const output = typeof lastUsage.output === 'number' ? lastUsage.output : undefined;
         let cacheRead = typeof lastUsage.cacheRead === 'number' ? lastUsage.cacheRead : undefined;
         let cacheWrite = typeof lastUsage.cacheWrite === 'number' ? lastUsage.cacheWrite : undefined;
-        // 使用 transcript 累加的缓存数据修正 lastUsage 的单次调用值
-        if (this.transcriptCacheUsage) {
-          if (this.transcriptCacheUsage.cacheRead != null) cacheRead = this.transcriptCacheUsage.cacheRead;
-          if (this.transcriptCacheUsage.cacheWrite != null) cacheWrite = this.transcriptCacheUsage.cacheWrite;
-        }
         if (input != null || output != null || cacheRead != null || cacheWrite != null) {
-          // 记录本轮结束时的累计值，用于下一轮计算差值
-          if (rawInput != null) {
-            this.previousRoundInputTokens = rawInput;
-            writePreviousRoundInput(this.deps.sessionKey, rawInput);
-          }
-          log.info('recordSessionStats: lastUsage found', { rawInput, previousRoundInputTokens: this.previousRoundInputTokens, input, output, cacheRead, cacheWrite });
+          log.info('recordSessionStats: using lastUsage (fallback)', { input, output, cacheRead, cacheWrite });
           incrementSessionStats(statsKey, { input, output, cacheRead, cacheWrite });
           return;
         }
       }
 
       // Fallback 1: 使用 footer 已经获取到的 metrics（由 getFooterSessionMetrics 计算好的差值）
-      // footerMetrics.inputTokens 已经是本轮差值（lastUsage.input - previousRoundInputTokens）
-      // 不能再减一次 previousRoundInputTokens，否则会双重减法导致统计值偏小
       if (footerMetrics && (footerMetrics.inputTokens || footerMetrics.outputTokens)) {
         const input = footerMetrics.inputTokens ?? 0;
         const output = footerMetrics.outputTokens ?? 0;
         const cacheRead = footerMetrics.cacheRead ?? 0;
         const cacheWrite = footerMetrics.cacheWrite ?? 0;
-        // 更新 previousRoundInputTokens：从 lastUsage 读取累计值
-        // footerMetrics 已经在 getFooterSessionMetrics 中更新过 previousRoundInputTokens
-        // 这里只需确保 lastUsage 可用时同步更新（防御性代码）
         log.info('recordSessionStats: using footer metrics (pre-computed delta)', { input, output, cacheRead, cacheWrite });
         incrementSessionStats(statsKey, { input, output, cacheRead, cacheWrite });
         return;
@@ -331,11 +324,16 @@ export class StreamingCardController {
    * store only has the last LLM call's cache values instead of the accumulated
    * total for the entire turn.
    */
-  private async accumulateTranscriptCacheUsage(sessionFile: string): Promise<{ cacheRead?: number; cacheWrite?: number }> {
+  private async accumulateTranscriptCacheUsage(sessionFile: string): Promise<{ cacheRead?: number; cacheWrite?: number; input?: number; output?: number }> {
     try {
+      // Only accumulate assistant messages AFTER the last user message (current turn only).
+      // The transcript file may contain multiple turns; we need just the current one.
       let totalCacheRead = 0;
       let totalCacheWrite = 0;
-      let found = false;
+      let totalInput = 0;
+      let totalOutput = 0;
+      let foundCache = false;
+      let foundToken = false;
 
       const rl = createInterface({
         input: createReadStream(sessionFile, { encoding: 'utf-8' }),
@@ -347,23 +345,45 @@ export class StreamingCardController {
         try {
           const parsed = JSON.parse(line);
           const msg = parsed?.message;
-          if (msg?.role === 'assistant' && msg.usage) {
+          if (!msg) continue;
+
+          // Reset counters when we see a user message (new turn starts)
+          if (msg.role === 'user') {
+            totalCacheRead = 0;
+            totalCacheWrite = 0;
+            totalInput = 0;
+            totalOutput = 0;
+            foundCache = false;
+            foundToken = false;
+            continue;
+          }
+
+          if (msg.role === 'assistant' && msg.usage) {
             const u = msg.usage;
             const cr = typeof u.cacheRead === 'number' ? u.cacheRead : 0;
             const cw = typeof u.cacheWrite === 'number' ? u.cacheWrite : 0;
             if (cr > 0 || cw > 0) {
               totalCacheRead += cr;
               totalCacheWrite += cw;
-              found = true;
+              foundCache = true;
+            }
+            const inp = typeof u.input === 'number' ? u.input : 0;
+            const out = typeof u.output === 'number' ? u.output : 0;
+            if (inp > 0 || out > 0) {
+              totalInput += inp;
+              totalOutput += out;
+              foundToken = true;
             }
           }
         } catch { /* skip malformed lines */ }
       }
 
-      if (!found) return {};
+      if (!foundCache && !foundToken) return {};
       return {
         cacheRead: totalCacheRead > 0 ? totalCacheRead : undefined,
         cacheWrite: totalCacheWrite > 0 ? totalCacheWrite : undefined,
+        input: totalInput > 0 ? totalInput : undefined,
+        output: totalOutput > 0 ? totalOutput : undefined,
       };
     } catch {
       return {};
@@ -414,18 +434,75 @@ export class StreamingCardController {
         return {};
       };
 
-      // Priority 1: Read from lastUsage (current turn's real-time data)
+      // Priority 1: Read token data from transcript file (per-turn, authoritative source)
+      // Read transcript FIRST to get the sessionFile path, then accumulate all LLM call data.
+      const cfgForTranscript = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
+      const sessionStorePathForTranscript = cfgForTranscript.sessions?.store ?? cfgForTranscript.session?.store;
+      const keyForTranscript = this.deps.sessionKey.trim().toLowerCase();
+      const defaultAgentIdForTranscript = resolveDefaultAgentId(this.deps.cfg as Record<string, unknown>) || 'main';
+      const fallbackKeyForTranscript = keyForTranscript.replace(/^(agent):[^:]+:/, `$1:${defaultAgentIdForTranscript}:`);
+      const candidateKeysForTranscript = fallbackKeyForTranscript !== keyForTranscript ? [keyForTranscript, fallbackKeyForTranscript] : [keyForTranscript];
+
+      const agentForTranscript = runtime.agent as Record<string, unknown> | undefined;
+      const sessionForTranscript = agentForTranscript?.session as Record<string, unknown> | undefined;
+      const resolveStorePathForTranscript = sessionForTranscript?.resolveStorePath as ((storePath?: string, opts?: { agentId?: string }) => string) | undefined;
+      const loadSessionStoreForTranscript = sessionForTranscript?.loadSessionStore as ((storePath: string) => Record<string, Record<string, unknown>>) | undefined;
+
+      let transcriptData: { cacheRead?: number; cacheWrite?: number; input?: number; output?: number } | undefined;
+      if (resolveStorePathForTranscript && loadSessionStoreForTranscript) {
+        try {
+          const storePath = resolveStorePathForTranscript(sessionStorePathForTranscript, { agentId: this.deps.agentId });
+          const store = loadSessionStoreForTranscript(storePath);
+          for (const candidate of candidateKeysForTranscript) {
+            const val = store[candidate];
+            if (val && typeof val === 'object') {
+              const entry = val as Record<string, unknown>;
+              const sessionFile = typeof entry.sessionFile === 'string' ? entry.sessionFile : undefined;
+              if (sessionFile) {
+                transcriptData = await this.accumulateTranscriptCacheUsage(sessionFile);
+                this.transcriptCacheUsage = transcriptData;
+              }
+              break;
+            }
+          }
+        } catch { /* ignore */ }
+      }
+
+      // Use transcript data: input + cacheRead = total input tokens (含缓存命中)
+      if (transcriptData && (transcriptData.input != null || transcriptData.cacheRead != null)) {
+        const transcriptInput = transcriptData.input ?? 0;
+        const transcriptCacheRead = transcriptData.cacheRead ?? 0;
+        const totalInputTokens = transcriptInput + transcriptCacheRead; // 含缓存的总输入
+        const outputTokens = transcriptData.output;
+        const resolvedCacheRead = transcriptData.cacheRead;
+        const resolvedCacheWrite = transcriptData.cacheWrite;
+
+        // Get contextTokens and model from session store or lastUsage
+        const fallback = readSessionStoreFallback();
+        const lastUsage = (runtime.agent as Record<string, unknown> | undefined)?.session &&
+          ((runtime.agent as Record<string, unknown>).session as Record<string, unknown>).lastUsage as Record<string, unknown> | undefined;
+        const contextTokens = (typeof lastUsage?.contextTokens === 'number' ? lastUsage.contextTokens : undefined) ?? fallback.contextTokens;
+        const model = (typeof lastUsage?.model === 'string' ? lastUsage.model : undefined) ?? fallback.model;
+
+        log.info('footer metrics: using transcript (current turn)', { transcriptInput, transcriptCacheRead, totalInputTokens, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, contextTokens, model });
+        return {
+          inputTokens: totalInputTokens > 0 ? totalInputTokens : undefined,
+          outputTokens,
+          cacheRead: resolvedCacheRead,
+          cacheWrite: resolvedCacheWrite,
+          totalTokens: (totalInputTokens > 0 || outputTokens != null) ? totalInputTokens + (outputTokens ?? 0) : undefined,
+          contextTokens,
+          model,
+        };
+      }
+
+      // Priority 1b: Transcript unavailable — fallback to lastUsage (runtime data)
       const agent = runtime.agent as Record<string, unknown> | undefined;
       const session = agent?.session as Record<string, unknown> | undefined;
       const lastUsage = session?.lastUsage as Record<string, unknown> | undefined;
 
       if (lastUsage) {
-        // OpenClaw runtime lastUsage fields: input, output, cacheRead, cacheWrite, total
-        // lastUsage.input 是会话累计值，需要减去上一轮的值得到本轮差值
-        const rawInput = typeof lastUsage.input === 'number' ? lastUsage.input : undefined;
-        const inputTokens = (rawInput != null && rawInput >= this.previousRoundInputTokens && this.previousRoundInputTokens > 0)
-          ? rawInput - this.previousRoundInputTokens
-          : rawInput; // 首轮或异常情况 fallback
+        const inputTokens = typeof lastUsage.input === 'number' ? lastUsage.input : undefined;
         const outputTokens = typeof lastUsage.output === 'number' ? lastUsage.output : undefined;
         const cacheRead = typeof lastUsage.cacheRead === 'number' ? lastUsage.cacheRead : undefined;
         const cacheWrite = typeof lastUsage.cacheWrite === 'number' ? lastUsage.cacheWrite : undefined;
@@ -434,54 +511,15 @@ export class StreamingCardController {
         const model = typeof lastUsage.model === 'string' ? lastUsage.model : undefined;
 
         if (inputTokens != null || outputTokens != null) {
-          // lastUsage has token data but may lack contextTokens and cache stats
-          // (OpenClaw doesn't include contextTokens in lastUsage; cache stats may
-          // be 0 or missing when the turn is aborted mid-reasoning)
-          // Supplement from session store if needed
           const fallback = readSessionStoreFallback();
           const resolvedContextTokens = contextTokens ?? fallback.contextTokens;
           const resolvedModel = model ?? fallback.model;
-          // Supplement cache stats: use session store values when lastUsage has 0 or undefined
           let resolvedCacheRead = (cacheRead != null && cacheRead > 0) ? cacheRead : (fallback.cacheRead ?? cacheRead);
           let resolvedCacheWrite = (cacheWrite != null && cacheWrite > 0) ? cacheWrite : (fallback.cacheWrite ?? cacheWrite);
-          // 修正缓存命中率：读取 transcript 文件累加所有 LLM 调用的 cache 数据
-          try {
-            const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
-            const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
-            const key = this.deps.sessionKey.trim().toLowerCase();
-            const defaultAgentId = resolveDefaultAgentId(this.deps.cfg as Record<string, unknown>) || 'main';
-            const fallbackKey = key.replace(/^(agent):[^:]+:/, `$1:${defaultAgentId}:`);
-            const candidateKeys = fallbackKey !== key ? [key, fallbackKey] : [key];
-            const agentAny = (runtime as Record<string, unknown>).agent as Record<string, unknown> | undefined;
-            const sessionApi = agentAny?.session as Record<string, unknown> | undefined;
-            const resolveStorePath = sessionApi?.resolveStorePath as ((storePath?: string, opts?: { agentId?: string }) => string) | undefined;
-            const loadSessionStore = sessionApi?.loadSessionStore as ((storePath: string) => Record<string, Record<string, unknown>>) | undefined;
-            if (resolveStorePath && loadSessionStore) {
-              const storePath = resolveStorePath(sessionStorePath, { agentId: this.deps.agentId });
-              const store = loadSessionStore(storePath);
-              for (const candidate of candidateKeys) {
-                const val = store[candidate];
-                if (val && typeof val === 'object') {
-                  const entry = val as Record<string, unknown>;
-                  const sessionFile = typeof entry.sessionFile === 'string' ? entry.sessionFile : undefined;
-                  if (sessionFile) {
-                    const transcriptCache = await this.accumulateTranscriptCacheUsage(sessionFile);
-                    if (transcriptCache.cacheRead != null) resolvedCacheRead = transcriptCache.cacheRead;
-                    if (transcriptCache.cacheWrite != null) resolvedCacheWrite = transcriptCache.cacheWrite;
-                    this.transcriptCacheUsage = transcriptCache;
-                  }
-                  break;
-                }
-              }
-            }
-          } catch { /* fallback to lastUsage values */ }
-          // Compute totalTokens from input+output when not available (streaming phase)
           const resolvedTotalTokens = totalTokens ?? (
             (inputTokens != null || outputTokens != null) ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined
           );
-          // 记录本轮累计值，供下一轮计算差值
-          if (rawInput != null) this.previousRoundInputTokens = rawInput;
-          log.debug('footer metrics: using lastUsage (current turn)', { rawInput, previousRoundInputTokens: this.previousRoundInputTokens, inputTokens, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, contextTokens: resolvedContextTokens, totalTokens: resolvedTotalTokens });
+          log.debug('footer metrics: using lastUsage (fallback)', { inputTokens, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, contextTokens: resolvedContextTokens, totalTokens: resolvedTotalTokens });
           return { inputTokens, outputTokens, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite, totalTokens: resolvedTotalTokens, contextTokens: resolvedContextTokens, model: resolvedModel };
         }
       }
@@ -515,35 +553,39 @@ export class StreamingCardController {
         }
 
         if (entry) {
-          // 当 lastUsage 不可用时，从 session store 读取作为 fallback
-          // session store 的 token 数据是会话累计值，缓存数据只有最后一次调用的值
-          // 需要读 transcript 文件累加所有 LLM 调用的 cache 数据
+          // Priority 2: Transcript unavailable — read from session store
           const storeModel = typeof entry.model === 'string' ? entry.model : undefined;
           const report = entry.systemPromptReport as Record<string, unknown> | undefined;
           const resolvedModel = storeModel ?? (typeof report?.model === 'string' ? report.model : undefined);
+          // Read transcript for cache data even in this fallback path
           let resolvedCacheRead = typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined;
           let resolvedCacheWrite = typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined;
-          // 读 transcript 文件累加 cache 数据（与 Priority 1 路径一致）
           const sessionFile = typeof entry.sessionFile === 'string' ? entry.sessionFile : undefined;
           if (sessionFile) {
             try {
               const transcriptCache = await this.accumulateTranscriptCacheUsage(sessionFile);
               if (transcriptCache.cacheRead != null) resolvedCacheRead = transcriptCache.cacheRead;
               if (transcriptCache.cacheWrite != null) resolvedCacheWrite = transcriptCache.cacheWrite;
+              // Also use transcript input/output if available
+              if (transcriptCache.input != null || transcriptCache.cacheRead != null) {
+                const totalInput = (transcriptCache.input ?? 0) + (transcriptCache.cacheRead ?? 0);
+                log.info('footer metrics: using transcript from session store fallback', { totalInput, output: transcriptCache.output, cacheRead: resolvedCacheRead, cacheWrite: resolvedCacheWrite });
+                return {
+                  inputTokens: totalInput > 0 ? totalInput : undefined,
+                  outputTokens: transcriptCache.output,
+                  cacheRead: resolvedCacheRead,
+                  cacheWrite: resolvedCacheWrite,
+                  totalTokens: (totalInput > 0 || transcriptCache.output != null) ? totalInput + (transcriptCache.output ?? 0) : undefined,
+                  contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
+                  model: resolvedModel,
+                };
+              }
             } catch { /* fallback to session store values */ }
           }
-          // session store 的 inputTokens 是累计值，需要减去 previousRoundInputTokens 得到本轮差值
+          // Final fallback: use session store values directly
           const rawStoreInput = typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined;
-          const storeInputTokens = (rawStoreInput != null && rawStoreInput >= this.previousRoundInputTokens && this.previousRoundInputTokens > 0)
-            ? rawStoreInput - this.previousRoundInputTokens
-            : rawStoreInput;
-          // 更新 previousRoundInputTokens 供下一轮计算
-          if (rawStoreInput != null) {
-            this.previousRoundInputTokens = rawStoreInput;
-            writePreviousRoundInput(this.deps.sessionKey, rawStoreInput);
-          }
           return {
-            inputTokens: storeInputTokens,
+            inputTokens: rawStoreInput,
             outputTokens: typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined,
             cacheRead: resolvedCacheRead,
             cacheWrite: resolvedCacheWrite,
@@ -563,21 +605,6 @@ export class StreamingCardController {
 
   constructor(deps: StreamingCardDeps) {
     this.deps = deps;
-
-    // 初始化 previousRoundInputTokens：从插件自己的状态文件读取上一轮的累计值
-    // 不依赖 session store（runtime 可能在 turn 运行期间更新它，导致读到当前轮的值）
-    try {
-      const prevInput = readPreviousRoundInput(deps.sessionKey);
-      if (prevInput != null) {
-        this.previousRoundInputTokens = prevInput;
-      } else {
-        // Fallback：从 session store 读取（首次运行或状态文件丢失时）
-        const storeTokens = this.readSessionStoreTokens();
-        if (storeTokens?.input != null) {
-          this.previousRoundInputTokens = storeTokens.input;
-        }
-      }
-    } catch { /* ignore */ }
 
     this.guard = new UnavailableGuard({
       replyToMessageId: deps.replyToMessageId,
