@@ -137,8 +137,16 @@ export class StreamingCardController {
   private dispatchFullyComplete = false;
   /** Set when the user clicks the stop button, preventing onIdle from overwriting the abort card. */
   private abortRequested = false;
-  /** Set when onDeliver just populated streamingPrefix, to prevent onPartialReply from duplicating. */
-  private deliverJustSetPrefix = false;
+  /** Latest complete display text confirmed by deliver(). */
+  private lastDeliveredText = '';
+  /** The base text and current segment of the latest deliver() snapshot. */
+  private lastDeliveredBase = '';
+  private lastDeliveredSegment = '';
+  /** Whether a partial callback may still be a delayed snapshot from deliver(). */
+  private awaitingPartialAfterDeliver = false;
+  /** Base text for the currently streaming partial segment. */
+  private partialBaseText = '';
+  private partialSegmentActive = false;
   /** Cached transcript cache usage (accumulated across all LLM calls in the turn). */
   private transcriptCacheUsage: { cacheRead?: number; cacheWrite?: number; input?: number; output?: number } | null = null;
   private cardCreationPromise: Promise<void> | null = null;
@@ -898,6 +906,8 @@ export class StreamingCardController {
     this.reasoning.reasoningStartTime = null;
     this.totalToolUseElapsedMs = 0;
     const answerText = split.answerText ?? text;
+    const hasPartialSegment = this.partialSegmentActive || Boolean(this.text.lastPartialText);
+    const currentBaseText = hasPartialSegment ? this.partialBaseText : this.text.streamingPrefix;
 
     // 累积 deliver 文本用于最终卡片
     // 当 onPartialReply 已处理过文本时（lastPartialText 非空），跳过 completedText 更新
@@ -911,13 +921,26 @@ export class StreamingCardController {
       // 首次 deliver：设置 prefix
       this.text.accumulatedText += (this.text.accumulatedText ? '\n\n' : '') + answerText;
       this.text.streamingPrefix = this.text.accumulatedText;
-      this.deliverJustSetPrefix = true;
-      await this.throttledCardUpdate();
     } else if (!this.text.lastPartialText && this.text.streamingPrefix) {
       // 后续 deliver：保留现有 prefix，只拼接到 accumulatedText
       this.text.accumulatedText = this.text.streamingPrefix + '\n\n' + answerText;
-      await this.throttledCardUpdate();
+    } else {
+      // onPartialReply may still be in flight when deliver() runs. Treat
+      // deliver as the authoritative snapshot for the current segment.
+      this.text.accumulatedText = currentBaseText
+        ? currentBaseText + '\n\n' + answerText
+        : answerText;
     }
+
+    this.text.streamingPrefix = this.text.accumulatedText;
+    this.lastDeliveredText = this.text.accumulatedText;
+    this.lastDeliveredBase = currentBaseText;
+    this.lastDeliveredSegment = answerText;
+    this.awaitingPartialAfterDeliver = true;
+    this.text.lastPartialText = '';
+    this.partialBaseText = '';
+    this.partialSegmentActive = false;
+    await this.throttledCardUpdate();
   }
 
   async onReasoningStream(payload: ReplyPayload): Promise<void> {
@@ -991,6 +1014,21 @@ export class StreamingCardController {
     log.debug('onPartialReply', { len: text.length });
     if (!text) return;
 
+    // OpenClaw does not await partial callbacks before it queues deliver().
+    // A delayed callback can therefore contain a shorter snapshot of the
+    // answer that deliver() has already confirmed. Keep the confirmed text
+    // for equal/prefix/suffix snapshots, but allow unrelated text through as
+    // a genuinely new segment.
+    const partialWasPendingAfterDeliver = this.awaitingPartialAfterDeliver;
+    if (this.isDelayedPartialSnapshot(text)) {
+      this.awaitingPartialAfterDeliver = false;
+      this.text.lastPartialText = '';
+      this.partialBaseText = '';
+      this.partialSegmentActive = false;
+      return;
+    }
+    this.awaitingPartialAfterDeliver = false;
+
     this.captureToolUseElapsed();
     if (this.reasoning.isReasoningPhase) {
       this.reasoning.isReasoningPhase = false;
@@ -1016,6 +1054,8 @@ export class StreamingCardController {
       // accumulatedText. We need to restore it so the full output is shown.
       if (this.textBeforeReasoning && !this.text.streamingPrefix) {
         this.text.streamingPrefix = this.textBeforeReasoning;
+        this.partialBaseText = this.textBeforeReasoning;
+        this.partialSegmentActive = true;
       }
       this.textBeforeReasoning = '';
       this.reasoning.accumulatedReasoningText = '';
@@ -1029,14 +1069,18 @@ export class StreamingCardController {
     this.text.lastPartialText = text;
     // 防止 onDeliver 设置的 streamingPrefix 与 onPartialReply 的 text 重复拼接
     // 当 onDeliver 先处理了初始文本并设置 streamingPrefix，onPartialReply 收到相同文本时不应重复拼接
-    if (this.deliverJustSetPrefix) {
-      this.deliverJustSetPrefix = false;
-      this.text.accumulatedText = this.text.streamingPrefix;
-    } else if (this.text.streamingPrefix) {
-      this.text.accumulatedText = this.text.streamingPrefix + '\n\n' + text;
-    } else {
-      this.text.accumulatedText = text;
+    if (partialWasPendingAfterDeliver) {
+      this.partialBaseText = text.startsWith(this.lastDeliveredSegment)
+        ? this.lastDeliveredBase
+        : this.lastDeliveredText;
+      this.partialSegmentActive = true;
+    } else if (!this.partialSegmentActive) {
+      this.partialBaseText = this.text.streamingPrefix;
+      this.partialSegmentActive = true;
     }
+    this.text.accumulatedText = this.partialBaseText
+      ? this.partialBaseText + '\n\n' + text
+      : text;
 
     // NO_REPLY 缓冲
     if (!this.text.streamingPrefix && SILENT_REPLY_TOKEN.startsWith(this.text.accumulatedText.trim())) {
@@ -1048,6 +1092,14 @@ export class StreamingCardController {
     if (!this.shouldProceed('onPartialReply.postCreate')) return;
     if (!this.cardKit.cardMessageId) return;
     await this.throttledCardUpdate();
+  }
+
+  private isDelayedPartialSnapshot(text: string): boolean {
+    if (!this.awaitingPartialAfterDeliver || !this.lastDeliveredText) return false;
+    return [this.lastDeliveredText, this.lastDeliveredSegment].some((confirmed) => {
+      if (!confirmed || text.length > confirmed.length) return false;
+      return confirmed === text || confirmed.startsWith(text) || confirmed.endsWith(text);
+    });
   }
 
   async onError(err: unknown, info: { kind: string }): Promise<void> {
